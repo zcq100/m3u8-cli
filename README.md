@@ -1,4 +1,4 @@
-# m3u8_download
+# m3u8-download
 
 一个基于 Python 的 HLS（m3u8）视频下载器：并发下载分片、支持 AES-128 解密、本地缓存与断点续传，最后通过 FFmpeg 无损封装为 MP4。
 
@@ -28,31 +28,31 @@ uv sync
 ## 使用
 
 ```bash
-uv run download-v "<m3u8_url>"
+uv run m3u8-download "<m3u8_url>"
 ```
 
 也可以以模块方式运行：
 
 ```bash
-uv run python -m download_v "<m3u8_url>"
+uv run python -m m3u8_download "<m3u8_url>"
 ```
 
 ### 常用示例
 
 ```bash
 # 默认输出到 output/output.mp4
-uv run download-v "https://example.com/playlist.m3u8"
+uv run m3u8-download "https://example.com/playlist.m3u8"
 
 # 指定输出文件名与并发数
-uv run download-v "https://example.com/playlist.m3u8" -o movie.mp4 -j 16
+uv run m3u8-download "https://example.com/playlist.m3u8" -o movie.mp4 -j 16
 
 # 需要 Referer / Cookie 等请求头时
-uv run download-v "https://example.com/playlist.m3u8" \
+uv run m3u8-download "https://example.com/playlist.m3u8" \
   --referer "https://example.com/" \
   --cookie "session=xxxx"
 
 # 覆盖已存在的最终文件
-uv run download-v "https://example.com/playlist.m3u8" -o movie.mp4 --overwrite
+uv run m3u8-download "https://example.com/playlist.m3u8" -o movie.mp4 --overwrite
 ```
 
 ### 参数
@@ -120,14 +120,14 @@ uv build
 代码结构：
 
 ```
-src/download_v/
+src/m3u8_download/
 ├── cli.py           # 命令行入口与流程编排
 ├── playlist.py      # m3u8 解析
 ├── downloader.py    # 并发下载与 AES-128 解密
 ├── merge.py         # 分片合并与 FFmpeg 封装
 ├── paths.py         # 任务目录派生
 ├── errors.py        # 共享异常
-└── __main__.py      # python -m download_v
+└── __main__.py      # python -m m3u8_download
 ```
 
 `reference/hls_downloader.py` 是早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护。
