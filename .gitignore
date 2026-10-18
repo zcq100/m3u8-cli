@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 下载产物与缓存
+*.mp4
+*.part
+*.hls-cache/
+**/cache/
+output.segments/
