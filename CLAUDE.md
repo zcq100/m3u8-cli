@@ -6,43 +6,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 这是一个 HLS 视频下载工具：
 
-- `main.py`：唯一维护的主入口。并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装。所有产物写入以输出文件名派生的任务子目录。
-- `hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
+- `src/download_v/`：唯一维护的实现，打包为 `download_v` 包，提供 `download-v` 命令和 `python -m download_v` 两种入口。并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装。所有产物写入以输出文件名派生的任务子目录。
+- `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
 
 运行环境依赖 `ffmpeg`（需在 PATH 中）和 `uv`。Python 版本固定为 3.12（见 `.python-version`）。
 
 ## 常用命令
 
 ```bash
-# 安装依赖
+# 安装依赖并更新入口点
 uv sync
 
 # 主下载器（并发 + 缓存）
 # -o output.mp4 会生成 output/output.mp4 和 output/cache/
-uv run python main.py "<m3u8_url>" -o output.mp4 -j 8
+uv run download-v "<m3u8_url>" -o output.mp4 -j 8
+uv run python -m download_v "<m3u8_url>" -o output.mp4 -j 8
 
 # 需要鉴权时
-uv run python main.py "<url>" --referer "<referer>" --cookie "<cookie>"
+uv run download-v "<url>" --referer "<referer>" --cookie "<cookie>"
 
-# 打包（包入口目前是占位实现）
+# 打包
 uv build
-uv run download-v
 ```
 
 仓库目前没有测试、lint 或格式化配置，也没有 CI。
 
 ## 架构
 
-### main.py（主流程）
+### 模块划分
 
-处理链分为四个阶段：
+- `cli.py`：argparse、参数校验、流程编排、`state.json` 指纹处理，并统一捕获 `HLSException` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `playlist.py`：播放列表获取与解析。递归解析 master playlist 并选择 `BANDWIDTH` 最高的变体（最多 5 层），解析 `EXT-X-KEY` / `EXT-X-MAP`，返回分片列表和播放列表原文的 SHA-256 指纹。
+- `downloader.py`：`Downloader` 负责单个 URL 的获取、重试、密钥缓存和 AES-128 解密。每个线程持有自己的 `requests.Session`（`threading.local`）；密钥按 URL 全局缓存并加锁。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
+- `paths.py`：把 `-o` 派生为 `(final, cache_dir)`，并校验任务目录。
+- `merge.py`：`combine_segments()` 按播放列表顺序拼接本地分片（fMP4 先写初始化片段）；`mux()` 对本地 `combined.*` 运行一次 FFmpeg（`-map 0 -c copy -movflags +faststart`），先输出到 `cache/*.partial.mp4`，成功后原子替换为最终文件。
+- `errors.py`：共享的 `HLSException`。
 
-1. **播放列表解析** — `load_playlist()` 递归解析 master playlist，选择 `BANDWIDTH` 最高的变体（最多 5 层）；随后逐行解析媒体播放列表，记录每个分片的 URL、媒体序列号、当前生效的 `EXT-X-KEY` 和 `EXT-X-MAP`。返回的 `fingerprint` 是对播放列表原文的 SHA-256。
-2. **并发下载** — `Downloader` 用 `ThreadPoolExecutor` 下载分片。每个线程持有自己的 `requests.Session`（`threading.local`）；密钥按 URL 全局缓存并加锁，避免重复拉取。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
+### 处理流程
+
+1. **播放列表解析** — `playlist.load_playlist()` 选择最高带宽变体并生成分片元数据。
+2. **并发下载** — `downloader.Downloader` 配合 `ThreadPoolExecutor` 下载分片和初始化片段。
 3. **解密** — 仅支持 `METHOD=AES-128` 且 `KEYFORMAT=identity`。未提供 `IV` 标签时，按 HLS 规范用分片媒体序列号（16 字节大端）作为 IV。
-4. **合并与封装** — 在本地按播放列表顺序拼接缓存分片：fMP4 先写入初始化片段再拼媒体分片，TS 直接拼接。最后只对本地 `combined.*` 运行一次 FFmpeg（`-map 0 -c copy -movflags +faststart`），先输出到 `.partial.mp4`，成功后再重命名为目标文件。
+4. **合并与封装** — `merge.combine_segments()` 在本地拼接，`merge.mux()` 调用 FFmpeg 无损封装。
 
-路径由 `resolve_task_paths()` 统一派生：`-o output_2.mp4` 生成任务目录 `output_2/`，最终文件为 `output_2/output_2.mp4`，中间产物在 `output_2/cache/`。若输出路径本身已经是 `<dir>/<dir>.mp4` 形式，则复用该目录，避免重复嵌套。
+合并顺序以播放列表中的分片索引为准，不能用 `as_completed()` 的完成顺序。
+
+### 任务目录
+
+路径由 `paths.resolve_task_paths()` 统一派生：`-o output_2.mp4` 生成任务目录 `output_2/`，最终文件为 `output_2/output_2.mp4`，中间产物在 `output_2/cache/`。若输出路径本身已经是 `<dir>/<dir>.mp4` 形式，则复用该目录，避免重复嵌套。
 
 任务目录布局是持久化契约，改动时必须同时更新下载、失效清理和合并三处：
 
@@ -57,15 +68,13 @@ uv run download-v
     <name>.partial.mp4
 ```
 
-合并顺序以播放列表中的分片索引为准，不能用 `as_completed()` 的完成顺序。
+### 参考实现
 
-### hls_downloader.py（仅参考，不再维护）
-
-单次 FFmpeg 调用：通过 `-headers` 传入鉴权头（CRLF 分隔），开启 `-reconnect`，失败时删除输出并重试整个 FFmpeg 进程。`--reencode` 切换到 libx264/AAC，否则 `-c copy`。该脚本不做分片缓存，也无断点续传，且未采用任务子目录布局。不要修改此文件。
+`reference/hls_downloader.py` 通过单次 FFmpeg 调用完成下载、解密和封装，不做分片缓存，也无断点续传，且未采用任务子目录布局。不要修改此文件。
 
 ### 打包
 
-`pyproject.toml` 定义了 `download-v` 命令，但 `src/download_v/__init__.py` 目前只打印占位文本，与根目录脚本没有关联。若要把下载器接入包入口，需同时修改该文件和 `[project.scripts]`。
+`pyproject.toml` 使用 `uv_build` 后端，自动从 `src/` 发现 `download_v` 包；`[project.scripts]` 的 `download-v = "download_v.cli:main"` 是命令入口，`src/download_v/__main__.py` 支持 `python -m download_v`。
 
 ## 已知限制
 

@@ -1,0 +1,2 @@
+class HLSException(RuntimeError):
+    pass
