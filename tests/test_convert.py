@@ -362,7 +362,7 @@ class ConvertVideoTests(unittest.TestCase):
 
         self.assertEqual(
             captured["info"],
-            f"key.bin\n{out / 'key.bin'}\n",
+            f"key.bin\n{out.resolve() / 'key.bin'}\n",
         )
         self.assertEqual(len((out / "key.bin").read_bytes()), 16)
         self.assertFalse((out / ".key_info.txt").exists())

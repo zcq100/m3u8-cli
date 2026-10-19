@@ -714,4 +714,4 @@ uv run python -m compileall -q src
 git status --short
 ```
 
-Expected: 38 tests OK；compileall 无输出；工作区干净。
+Expected: 39 tests OK；compileall 无输出；工作区干净。

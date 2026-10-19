@@ -174,11 +174,12 @@ def convert_video(input_arg, fmt, codec, output_arg,
         playlist = output_dir / "playlist.m3u8"
         segments_dir = output_dir / "ts"
         key_path = output_dir / HLS_KEY_NAME
-        key_info_path = output_dir / HLS_KEY_INFO_NAME
-        if key_path.is_dir() and not key_path.is_symlink():
-            raise HLSException(f"密钥路径是目录：{key_path}")
-        if key_info_path.is_dir() and not key_info_path.is_symlink():
-            raise HLSException(f"密钥信息路径是目录：{key_info_path}")
+        if encrypt:
+            key_info_path = output_dir / HLS_KEY_INFO_NAME
+            if key_path.is_dir() and not key_path.is_symlink():
+                raise HLSException(f"密钥路径是目录：{key_path}")
+            if key_info_path.is_dir() and not key_info_path.is_symlink():
+                raise HLSException(f"密钥信息路径是目录：{key_info_path}")
 
         if playlist == input_path:
             raise HLSException(f"输出文件与输入文件相同：{playlist}")
@@ -209,7 +210,7 @@ def convert_video(input_arg, fmt, codec, output_arg,
             key_path = _write_hls_key(output_dir)
             try:
                 key_info = _write_key_info(output_dir, key_path)
-            except Exception:
+            except BaseException:
                 key_path.unlink(missing_ok=True)
                 raise
         else:
