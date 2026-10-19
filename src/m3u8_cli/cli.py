@@ -18,7 +18,7 @@ from .playlist import load_playlist
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="m3u8-download",
+        prog="m3u8-cli",
         description="并发下载 HLS 分片，产物保存在任务子目录中",
     )
     parser.add_argument("url", help="m3u8 地址")

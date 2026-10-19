@@ -4,14 +4,14 @@
 
 ## 目标
 
-把根目录 430 行的 `main.py` 拆分为 `src/m3u8_download/` 下的职责明确的模块，接入 `pyproject.toml` 的 `m3u8-download` 入口；参考脚本移入 `reference/`。CLI 行为、任务子目录布局、缓存与续传语义保持不变。
+把根目录 430 行的 `main.py` 拆分为 `src/m3u8_cli/` 下的职责明确的模块，接入 `pyproject.toml` 的 `m3u8-cli` 入口；参考脚本移入 `reference/`。CLI 行为、任务子目录布局、缓存与续传语义保持不变。
 
 ## 目标结构
 
 ```
-src/m3u8_download/
+src/m3u8_cli/
 ├── __init__.py      # 包版本，无副作用
-├── __main__.py      # python -m m3u8_download
+├── __main__.py      # python -m m3u8_cli
 ├── cli.py           # argparse、流程编排、顶层错误处理
 ├── errors.py        # HLSException
 ├── paths.py         # 任务目录派生
@@ -33,8 +33,8 @@ reference/
 
 ## 入口与兼容性
 
-- `pyproject.toml`：`m3u8-download = "m3u8_download.cli:main"`。
-- 运行方式：`uv run m3u8-download ...` 或 `uv run python -m m3u8_download ...`。
+- `pyproject.toml`：`m3u8-cli = "m3u8_cli.cli:main"`。
+- 运行方式：`uv run m3u8-cli ...` 或 `uv run python -m m3u8_cli ...`。
 - 删除根目录 `main.py`；`hls_downloader.py` 原样移动到 `reference/`，不修改内容。
 - 参数、输出文案、任务目录布局、缓存与续传语义不变。
 

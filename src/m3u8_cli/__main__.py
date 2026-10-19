@@ -1,4 +1,4 @@
-"""支持 python -m m3u8_download。"""
+"""支持 python -m m3u8_cli。"""
 
 from .cli import main
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 这是一个 HLS 视频下载工具：
 
-- `src/m3u8_download/`：唯一维护的实现，打包为 `m3u8_download` 包，提供 `m3u8-download` 命令和 `python -m m3u8_download` 两种入口。并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装。所有产物写入以输出文件名派生的任务子目录。
+- `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装。所有产物写入以输出文件名派生的任务子目录。
 - `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
 
 运行环境依赖 `ffmpeg`（需在 PATH 中）和 `uv`。Python 版本固定为 3.12（见 `.python-version`）。
@@ -19,11 +19,11 @@ uv sync
 
 # 主下载器（并发 + 缓存）
 # -o output.mp4 会生成 output/output.mp4 和 output/cache/
-uv run m3u8-download "<m3u8_url>" -o output.mp4 -j 8
-uv run python -m m3u8_download "<m3u8_url>" -o output.mp4 -j 8
+uv run m3u8-cli "<m3u8_url>" -o output.mp4 -j 8
+uv run python -m m3u8_cli "<m3u8_url>" -o output.mp4 -j 8
 
 # 需要鉴权时
-uv run m3u8-download "<url>" --referer "<referer>" --cookie "<cookie>"
+uv run m3u8-cli "<url>" --referer "<referer>" --cookie "<cookie>"
 
 # 打包
 uv build
@@ -74,7 +74,7 @@ uv build
 
 ### 打包
 
-`pyproject.toml` 使用 `uv_build` 后端，自动从 `src/` 发现 `m3u8_download` 包；`[project.scripts]` 的 `m3u8-download = "m3u8_download.cli:main"` 是命令入口，`src/m3u8_download/__main__.py` 支持 `python -m m3u8_download`。
+`pyproject.toml` 使用 `uv_build` 后端，自动从 `src/` 发现 `m3u8_cli` 包；`[project.scripts]` 的 `m3u8-cli = "m3u8_cli.cli:main"` 是命令入口，`src/m3u8_cli/__main__.py` 支持 `python -m m3u8_cli`。
 
 ## 已知限制
 
