@@ -9,6 +9,7 @@ import sys
 
 import requests
 
+from .convert import convert_video
 from .downloader import Downloader
 from .errors import HLSException
 from .merge import combine_segments, mux
@@ -42,6 +43,33 @@ def build_parser():
     download.add_argument(
         "--overwrite", action="store_true",
         help="覆盖已有输出文件",
+    )
+
+    convert = subparsers.add_parser(
+        "convert",
+        help="把本地视频转换为 HLS 或其他格式",
+        description="用 FFmpeg 转换视频格式，默认输出 HLS",
+    )
+    convert.add_argument("input", help="输入视频文件")
+    convert.add_argument(
+        "-f", "--format", choices=("hls", "mp4", "mkv", "webm"),
+        default="hls", help="输出格式（默认 hls）",
+    )
+    convert.add_argument(
+        "-c", "--codec", choices=("h264", "hevc", "copy"),
+        default="h264", help="编码方式（默认 h264）",
+    )
+    convert.add_argument(
+        "-o", "--output-dir",
+        help="输出目录；默认为输入文件名",
+    )
+    convert.add_argument(
+        "--segment-time", type=int, default=6,
+        help="HLS 分片时长（秒，默认 6）",
+    )
+    convert.add_argument(
+        "--overwrite", action="store_true",
+        help="覆盖已有产物",
     )
     return parser
 
@@ -143,6 +171,21 @@ def run_download(args):
     print(f"分片缓存：{cache}")
 
 
+def run_convert(args):
+    if not shutil.which("ffmpeg"):
+        sys.exit("请先安装 ffmpeg")
+
+    output = convert_video(
+        args.input,
+        args.format,
+        args.codec,
+        args.output_dir,
+        args.segment_time,
+        args.overwrite,
+    )
+    print(f"完成：{output}")
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -151,6 +194,10 @@ def main():
         if args.jobs < 1 or args.timeout < 1 or args.retries < 0:
             parser.error("jobs/timeout 必须为正数，retries 不能为负数")
         handler = run_download
+    else:
+        if args.segment_time < 1:
+            parser.error("segment-time 必须为正整数")
+        handler = run_convert
 
     try:
         handler(args)
