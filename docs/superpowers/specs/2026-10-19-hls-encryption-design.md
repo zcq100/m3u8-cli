@@ -95,7 +95,7 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
    - `--encrypt` 转换后播放列表包含
      `#EXT-X-KEY:METHOD=AES-128,URI="key.bin"`；
    - `key.bin` 为 16 字节；
-   - `ffprobe` 能读取加密后的播放列表。
+   - `ffprobe` 能读取加密后的播放列表（必须传 `-allowed_extensions ALL`，否则默认拒绝 `key.bin` 扩展名）。
 3. 全量 `uv run python -m unittest discover -s tests -v` 通过。
 
 ## 文档
@@ -108,4 +108,6 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
 
 - 密钥与播放列表同目录分发，这是标准 HLS AES-128 的常见做法，不是 DRM；能访问 `key.bin` 的客户端即可解密。
 - 不提供自定义密钥、密钥 URI 或 IV 的参数。
+- FFmpeg 的 HLS muxer 会写入固定的 `IV=0`，所有分片共用同一密钥与 IV；这是该实现方式的已知限制。
+- FFmpeg/ffprobe 默认拒绝 `key.bin` 扩展名，本地播放或探测需加 `-allowed_extensions ALL`；浏览器播放器不受此限制。
 - 不实现 SAMPLE-AES 或任何 DRM。

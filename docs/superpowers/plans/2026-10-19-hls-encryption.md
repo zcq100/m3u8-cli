@@ -541,6 +541,7 @@ git commit -m "接入 HLS 加密开关"
             probe = subprocess.run(
                 [
                     "ffprobe", "-v", "error",
+                    "-allowed_extensions", "ALL",
                     "-show_entries", "format=format_name",
                     "-of", "default=nw=1",
                     str(playlist),
@@ -666,7 +667,7 @@ find sample -type f | sort
 head -8 sample/playlist.m3u8
 wc -c sample/key.bin
 test ! -e sample/.key_info.txt && echo "key_info cleaned"
-ffprobe -v error -show_entries format=format_name \
+ffprobe -v error -allowed_extensions ALL -show_entries format=format_name \
   -of default=nw=1 sample/playlist.m3u8
 ```
 

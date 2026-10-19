@@ -347,15 +347,42 @@ class ConvertVideoTests(unittest.TestCase):
     @mock.patch("m3u8_cli.convert.subprocess.run")
     def test_encrypt_writes_key_and_cleans_key_info(self, run):
         out = self.dir / "out"
+        captured = {}
+
+        def fake_run(command, check):
+            captured["info"] = (out / ".key_info.txt").read_text(
+                encoding="utf-8"
+            )
+
+        run.side_effect = fake_run
 
         convert_video(
             self.input, "hls", "h264", str(out), 6, False, True
         )
 
+        self.assertEqual(
+            captured["info"],
+            f"key.bin\n{out / 'key.bin'}\n",
+        )
         self.assertEqual(len((out / "key.bin").read_bytes()), 16)
         self.assertFalse((out / ".key_info.txt").exists())
         command = run.call_args.args[0]
         self.assertIn("-hls_key_info_file", command)
+
+    def test_overwrite_key_dir_does_not_destroy_old_output(self):
+        out = self.dir / "out"
+        (out / "ts").mkdir(parents=True)
+        (out / "playlist.m3u8").write_text("old", encoding="utf-8")
+        (out / "ts" / "000000.ts").write_bytes(b"old")
+        (out / "key.bin").mkdir()
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, True, True
+            )
+
+        self.assertTrue((out / "playlist.m3u8").exists())
+        self.assertTrue((out / "ts" / "000000.ts").exists())
 
     def test_encrypt_requires_hls(self):
         with self.assertRaises(HLSException):
