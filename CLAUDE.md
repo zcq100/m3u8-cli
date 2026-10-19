@@ -42,7 +42,7 @@ uv build
 
 ### 模块划分
 
-- `cli.py`：argparse 子命令（`download` / `convert`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()`，并统一捕获 `HLSException` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `cli.py`：argparse 子命令（`download` / `convert`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
 - `convert.py`：格式白名单、编码映射、输出路径派生、覆盖检查与 FFmpeg 调用。
 - `playlist.py`：播放列表获取与解析。递归解析 master playlist 并选择 `BANDWIDTH` 最高的变体（最多 5 层），解析 `EXT-X-KEY` / `EXT-X-MAP`，返回分片列表和播放列表原文的 SHA-256 指纹。
 - `downloader.py`：`Downloader` 负责单个 URL 的获取、重试、密钥缓存和 AES-128 解密。每个线程持有自己的 `requests.Session`（`threading.local`）；密钥按 URL 全局缓存并加锁。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
@@ -61,7 +61,7 @@ uv build
 
 ### 转换流程
 
-`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，只删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件，失败可能丢失旧产物；输出路径、临时输出路径和 `ts/` 不允许是符号链接，陈旧的 `.partial.*` 会在调用 FFmpeg 前删除。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
+`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，只删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件，失败可能丢失旧产物；`ts/` 不允许是符号链接，未指定 `--overwrite` 时悬空的目标符号链接也视为已存在，指定时原子替换链接本身而不跟随目标；陈旧的 `.partial.*` 会在调用 FFmpeg 前删除。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
 
 ### 任务目录
 

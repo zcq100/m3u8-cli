@@ -47,7 +47,7 @@ m3u8-cli convert <input> [-f {hls,mp4,mkv,webm}] [-c {h264,hevc,copy}]
 - 指定 `--overwrite` 时：
   - HLS 先删除旧的 `playlist.m3u8` 和 `ts/` 中 6 位编号的 `.ts` 文件，再开始转换，避免残留旧分片；`ts/` 中的其他条目保留。
   - 单文件格式先写入同目录的 `<stem>.partial.<ext>`，成功后原子替换目标文件，失败时删除临时文件。
-- 输出路径、临时输出路径和 `ts/` 不允许是符号链接；陈旧的 `.partial.*` 在调用 FFmpeg 前删除。
+- `ts/` 不允许是符号链接；未指定 `--overwrite` 时，悬空的目标符号链接也视为已存在；指定 `--overwrite` 时原子替换链接本身，不跟随目标。陈旧的 `.partial.*` 在调用 FFmpeg 前删除。
 
 ## 编码映射
 
