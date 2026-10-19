@@ -41,7 +41,10 @@ def resolve_output_dir(input_path, output_arg):
     if output_dir.exists() and not output_dir.is_dir():
         raise HLSException(f"输出路径不是目录：{output_dir}")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HLSException(f"无法创建输出目录：{output_dir}（{exc}）") from exc
     return output_dir
 
 
@@ -72,6 +75,7 @@ def build_hls_command(input_path, output_dir, codec, segment_time):
         "-hls_time", str(segment_time),
         "-hls_playlist_type", "vod",
         "-hls_list_size", "0",
+        "-hls_base_url", "ts/",
         "-hls_segment_filename", str(output_dir / "ts" / "%06d.ts"),
         str(output_dir / "playlist.m3u8"),
     ]
