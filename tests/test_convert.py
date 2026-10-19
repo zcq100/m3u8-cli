@@ -114,6 +114,11 @@ class CommandTests(unittest.TestCase):
         self.assertIn("-hls_key_info_file", command)
         index = command.index("-hls_key_info_file")
         self.assertEqual(command[index + 1], "/out/.key_info.txt")
+        self.assertLess(
+            command.index("-hls_key_info_file"),
+            command.index("-hls_segment_filename"),
+        )
+        self.assertEqual(command[-1], "/out/playlist.m3u8")
 
     def test_hls_without_encrypt_has_no_key_info(self):
         command = build_hls_command(
@@ -338,6 +343,103 @@ class ConvertVideoTests(unittest.TestCase):
             convert_video(
                 self.input, "mp4", "h264", str(self.dir), 6, True
             )
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_encrypt_writes_key_and_cleans_key_info(self, run):
+        out = self.dir / "out"
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, False, True
+        )
+
+        self.assertEqual(len((out / "key.bin").read_bytes()), 16)
+        self.assertFalse((out / ".key_info.txt").exists())
+        command = run.call_args.args[0]
+        self.assertIn("-hls_key_info_file", command)
+
+    def test_encrypt_requires_hls(self):
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "mp4", "h264", str(self.dir / "out"), 6,
+                False, True,
+            )
+
+    def test_encrypt_existing_key_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "key.bin").write_bytes(b"x" * 16)
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, False, True
+            )
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_encrypt_overwrite_generates_new_key(self, run):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "key.bin").write_bytes(b"old-key")
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, True, True
+        )
+        first = (out / "key.bin").read_bytes()
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, True, True
+        )
+        second = (out / "key.bin").read_bytes()
+
+        self.assertEqual(len(first), 16)
+        self.assertEqual(len(second), 16)
+        self.assertNotEqual(first, second)
+
+    def test_encrypt_key_symlink_without_overwrite_rejected(self):
+        out = self.dir / "out"
+        out.mkdir()
+        target = self.dir / "real-key.bin"
+        target.write_bytes(b"x" * 16)
+        (out / "key.bin").symlink_to(target)
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, False, True
+            )
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_encrypt_overwrite_replaces_key_symlink(self, run):
+        out = self.dir / "out"
+        out.mkdir()
+        target = self.dir / "real-key.bin"
+        target.write_bytes(b"target")
+        (out / "key.bin").symlink_to(target)
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, True, True
+        )
+
+        key = out / "key.bin"
+        self.assertFalse(key.is_symlink())
+        self.assertEqual(len(key.read_bytes()), 16)
+        self.assertEqual(target.read_bytes(), b"target")
+
+    def test_encrypt_failure_cleans_key_and_key_info(self):
+        out = self.dir / "out"
+
+        def fake_run(command, check):
+            self.assertTrue((out / ".key_info.txt").exists())
+            raise subprocess.CalledProcessError(1, command)
+
+        with mock.patch(
+            "m3u8_cli.convert.subprocess.run", side_effect=fake_run
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                convert_video(
+                    self.input, "hls", "h264", str(out), 6, False, True
+                )
+
+        self.assertFalse((out / "key.bin").exists())
+        self.assertFalse((out / ".key_info.txt").exists())
 
 
 if __name__ == "__main__":

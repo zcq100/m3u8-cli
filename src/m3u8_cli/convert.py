@@ -1,9 +1,14 @@
 """视频格式转换（FFmpeg）。"""
 
+import secrets
 import subprocess
 from pathlib import Path
 
 from .errors import HLSException
+
+HLS_KEY_NAME = "key.bin"
+HLS_KEY_INFO_NAME = ".key_info.txt"
+HLS_KEY_SIZE = 16
 
 FORMAT_SUFFIX = {
     "hls": None,
@@ -83,7 +88,7 @@ def build_hls_command(input_path, output_dir, codec, segment_time,
     if encrypt:
         command += [
             "-hls_key_info_file",
-            str(output_dir / ".key_info.txt"),
+            str(output_dir / HLS_KEY_INFO_NAME),
         ]
 
     command += [
@@ -128,9 +133,37 @@ def _clear_hls_output(playlist, segments_dir):
             entry.unlink()
 
 
+def _write_hls_key(output_dir):
+    """生成新的 AES-128 密钥并返回其路径。"""
+    key_path = output_dir / HLS_KEY_NAME
+    if key_path.is_symlink():
+        key_path.unlink()
+    elif key_path.exists() and key_path.is_dir():
+        raise HLSException(f"密钥路径是目录：{key_path}")
+    key_path.write_bytes(secrets.token_bytes(HLS_KEY_SIZE))
+    return key_path
+
+
+def _write_key_info(output_dir, key_path):
+    """写入 FFmpeg 的 key-info 临时文件并返回其路径。"""
+    key_info = output_dir / HLS_KEY_INFO_NAME
+    if key_info.is_symlink():
+        key_info.unlink()
+    elif key_info.exists() and key_info.is_dir():
+        raise HLSException(f"密钥信息路径是目录：{key_info}")
+    key_info.write_text(
+        f"{HLS_KEY_NAME}\n{key_path}\n",
+        encoding="utf-8",
+    )
+    return key_info
+
+
 def convert_video(input_arg, fmt, codec, output_arg,
-                  segment_time, overwrite):
+                  segment_time, overwrite, encrypt=False):
     """转换视频并返回最终产物路径。"""
+    if encrypt and fmt != "hls":
+        raise HLSException("--encrypt 仅适用于 HLS")
+
     input_path = Path(input_arg).expanduser().resolve()
     if not input_path.is_file():
         raise HLSException(f"输入文件不存在：{input_path}")
@@ -140,6 +173,7 @@ def convert_video(input_arg, fmt, codec, output_arg,
     if fmt == "hls":
         playlist = output_dir / "playlist.m3u8"
         segments_dir = output_dir / "ts"
+        key_path = output_dir / HLS_KEY_NAME
 
         if playlist == input_path:
             raise HLSException(f"输出文件与输入文件相同：{playlist}")
@@ -155,6 +189,7 @@ def convert_video(input_arg, fmt, codec, output_arg,
             playlist.exists()
             or playlist.is_symlink()
             or segments_dir.exists()
+            or (encrypt and (key_path.exists() or key_path.is_symlink()))
         ):
             raise HLSException(
                 f"目标已存在：{output_dir}，使用 --overwrite 覆盖"
@@ -164,10 +199,33 @@ def convert_video(input_arg, fmt, codec, output_arg,
             _clear_hls_output(playlist, segments_dir)
         segments_dir.mkdir(parents=True, exist_ok=True)
 
-        subprocess.run(
-            build_hls_command(input_path, output_dir, codec, segment_time),
-            check=True,
-        )
+        key_info = None
+        if encrypt:
+            key_path = _write_hls_key(output_dir)
+            try:
+                key_info = _write_key_info(output_dir, key_path)
+            except Exception:
+                key_path.unlink(missing_ok=True)
+                raise
+        else:
+            key_path = None
+
+        try:
+            subprocess.run(
+                build_hls_command(
+                    input_path, output_dir, codec, segment_time, encrypt
+                ),
+                check=True,
+            )
+        except Exception:
+            if key_info is not None:
+                key_info.unlink(missing_ok=True)
+            if key_path is not None:
+                key_path.unlink(missing_ok=True)
+            raise
+
+        if key_info is not None:
+            key_info.unlink(missing_ok=True)
         return playlist
 
     output = output_dir / (input_path.stem + FORMAT_SUFFIX[fmt])
