@@ -19,27 +19,34 @@ from .playlist import load_playlist
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="m3u8-cli",
+        description="HLS 下载与视频格式转换工具",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    download = subparsers.add_parser(
+        "download",
+        help="下载 HLS（m3u8）视频",
         description="并发下载 HLS 分片，产物保存在任务子目录中",
     )
-    parser.add_argument("url", help="m3u8 地址")
-    parser.add_argument(
+    download.add_argument("url", help="m3u8 地址")
+    download.add_argument(
         "-o", "--output", default="output.mp4",
         help="最终文件名；产物保存在以文件 stem 命名的任务目录中",
     )
-    parser.add_argument("-j", "--jobs", type=int, default=8)
-    parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--timeout", type=int, default=30)
-    parser.add_argument("--referer")
-    parser.add_argument("--cookie")
-    parser.add_argument("--user-agent", default="Mozilla/5.0")
-    parser.add_argument(
+    download.add_argument("-j", "--jobs", type=int, default=8)
+    download.add_argument("--retries", type=int, default=3)
+    download.add_argument("--timeout", type=int, default=30)
+    download.add_argument("--referer")
+    download.add_argument("--cookie")
+    download.add_argument("--user-agent", default="Mozilla/5.0")
+    download.add_argument(
         "--overwrite", action="store_true",
-        help="覆盖已有输出文件"
+        help="覆盖已有输出文件",
     )
     return parser
 
 
-def run(args):
+def run_download(args):
     if not shutil.which("ffmpeg"):
         sys.exit("请先安装 ffmpeg")
 
@@ -140,11 +147,13 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.jobs < 1 or args.timeout < 1 or args.retries < 0:
-        parser.error("jobs/timeout 必须为正数，retries 不能为负数")
+    if args.command == "download":
+        if args.jobs < 1 or args.timeout < 1 or args.retries < 0:
+            parser.error("jobs/timeout 必须为正数，retries 不能为负数")
+        handler = run_download
 
     try:
-        run(args)
+        handler(args)
     except (HLSException, requests.RequestException,
             subprocess.CalledProcessError) as exc:
         sys.exit(f"\n错误：{exc}")
