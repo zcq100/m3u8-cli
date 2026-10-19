@@ -372,10 +372,10 @@ def convert_video(input_arg, fmt, codec, output_arg,
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `uv run python -m unittest tests.test_convert.ConvertVideoTests -v`
-Expected: 21 tests OK。
+Expected: 22 tests OK。
 
 全量：`uv run python -m unittest discover -s tests -v`
-Expected: `Ran 35 tests ... OK`
+Expected: `Ran 36 tests ... OK`
 
 - [ ] **Step 5: 提交**
 
