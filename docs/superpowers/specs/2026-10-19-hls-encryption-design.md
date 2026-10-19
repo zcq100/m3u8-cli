@@ -55,7 +55,8 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
 
 ## 覆盖与安全
 
-- 开启 `--encrypt` 时，`key.bin` 纳入“目标已存在”判断：未指定 `--overwrite` 且 `playlist.m3u8`、`ts/` 或 `key.bin` 任一存在时报错。
+- 开启 `--encrypt` 时，`key.bin` 与 `.key_info.txt` 纳入“目标已存在”判断：未指定 `--overwrite` 且 `playlist.m3u8`、`ts/`、`key.bin` 或 `.key_info.txt` 任一存在时报错。
+- 输入文件不得是输出目录中的 `key.bin` 或 `.key_info.txt`，否则报错，避免生成的密钥产物覆盖源文件。
 - `--overwrite` 时先删除旧播放列表与 6 位编号分片，生成新密钥并覆盖 `key.bin`。
 - `key.bin` 是符号链接时：
   - 未指定 `--overwrite`：视为已存在，报错。

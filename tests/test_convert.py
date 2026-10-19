@@ -511,6 +511,45 @@ class ConvertVideoTests(unittest.TestCase):
         self.assertFalse((out / "key.bin").exists())
         self.assertFalse((out / ".key_info.txt").exists())
 
+    def test_encrypt_input_named_key_bin_rejected(self):
+        out = self.dir / "out"
+        out.mkdir()
+        input_path = out / "key.bin"
+        input_path.write_bytes(b"input")
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                input_path, "hls", "h264", str(out), 6, True, True
+            )
+
+        self.assertEqual(input_path.read_bytes(), b"input")
+
+    def test_encrypt_input_named_key_info_rejected(self):
+        out = self.dir / "out"
+        out.mkdir()
+        input_path = out / ".key_info.txt"
+        input_path.write_bytes(b"input")
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                input_path, "hls", "h264", str(out), 6, True, True
+            )
+
+        self.assertEqual(input_path.read_bytes(), b"input")
+
+    def test_encrypt_existing_key_info_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        key_info = out / ".key_info.txt"
+        key_info.write_text("keep", encoding="utf-8")
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, False, True
+            )
+
+        self.assertEqual(key_info.read_text(encoding="utf-8"), "keep")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -174,8 +174,9 @@ def convert_video(input_arg, fmt, codec, output_arg,
         playlist = output_dir / "playlist.m3u8"
         segments_dir = output_dir / "ts"
         key_path = output_dir / HLS_KEY_NAME
+        key_info_path = output_dir / HLS_KEY_INFO_NAME
+
         if encrypt:
-            key_info_path = output_dir / HLS_KEY_INFO_NAME
             if key_path.is_dir() and not key_path.is_symlink():
                 raise HLSException(f"密钥路径是目录：{key_path}")
             if key_info_path.is_dir() and not key_info_path.is_symlink():
@@ -185,6 +186,8 @@ def convert_video(input_arg, fmt, codec, output_arg,
             raise HLSException(f"输出文件与输入文件相同：{playlist}")
         if segments_dir == input_path or segments_dir in input_path.parents:
             raise HLSException(f"输入文件位于分片目录中：{input_path}")
+        if encrypt and (key_path == input_path or key_info_path == input_path):
+            raise HLSException(f"输出文件与输入文件相同：{input_path}")
         if segments_dir.is_symlink():
             raise HLSException(f"分片路径是符号链接：{segments_dir}")
         if segments_dir.exists() and not segments_dir.is_dir():
@@ -195,7 +198,15 @@ def convert_video(input_arg, fmt, codec, output_arg,
             playlist.exists()
             or playlist.is_symlink()
             or segments_dir.exists()
-            or (encrypt and (key_path.exists() or key_path.is_symlink()))
+            or (
+                encrypt
+                and (
+                    key_path.exists()
+                    or key_path.is_symlink()
+                    or key_info_path.exists()
+                    or key_info_path.is_symlink()
+                )
+            )
         ):
             raise HLSException(
                 f"目标已存在：{output_dir}，使用 --overwrite 覆盖"

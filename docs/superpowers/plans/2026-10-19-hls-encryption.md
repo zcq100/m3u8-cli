@@ -646,7 +646,8 @@ git commit -m "更新 HLS 加密文档与忽略规则"
 - FFmpeg 的 HLS muxer 写入固定 `IV=0`，所有分片共用同一密钥与 IV，已记录为已知限制。
 - `key.bin` / `.key_info.txt` 的目录形态在破坏性清理前校验，避免 `--overwrite` 先删旧产物再报错。
 - key-info 清理移入 `finally`，覆盖 `KeyboardInterrupt`。
-- 测试总数因新增“清理前校验”用例增加 1：Task 2 后为 36，Task 3 后为 39，Task 4 后为 40。
+- 输入路径与 `key.bin` / `.key_info.txt` 冲突时拒绝转换；`.key_info.txt` 纳入无 `--overwrite` 的存在性检查。
+- 测试总数因新增“清理前校验”用例增加 1：Task 2 后为 36，Task 3 后为 39，Task 4 后为 40（最终加固后为 43）。
 
 ---
 
@@ -714,4 +715,4 @@ uv run python -m compileall -q src
 git status --short
 ```
 
-Expected: 40 tests OK；compileall 无输出；工作区干净。
+Expected: 43 tests OK；compileall 无输出；工作区干净。
