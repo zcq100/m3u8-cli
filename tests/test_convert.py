@@ -219,6 +219,17 @@ class ConvertVideoTests(unittest.TestCase):
             "keep",
         )
 
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_overwrite_preserves_non_ascii_digit_names(self, run):
+        out = self.dir / "out"
+        (out / "ts").mkdir(parents=True)
+        (out / "ts" / "²²²²²².ts").write_bytes(b"keep")
+        (out / "playlist.m3u8").write_text("old", encoding="utf-8")
+
+        convert_video(self.input, "hls", "h264", str(out), 6, True)
+
+        self.assertTrue((out / "ts" / "²²²²²².ts").exists())
+
     def test_ts_symlink_rejected(self):
         out = self.dir / "out"
         target = self.dir / "elsewhere"

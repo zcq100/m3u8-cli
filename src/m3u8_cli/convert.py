@@ -111,6 +111,7 @@ def _clear_hls_output(playlist, segments_dir):
         if (
             entry.name.endswith(".ts")
             and len(stem) == 6
+            and stem.isascii()
             and stem.isdigit()
             and (entry.is_file() or entry.is_symlink())
         ):

@@ -106,7 +106,7 @@ ffmpeg -hide_banner -y -i <input> -map 0:v? -map 0:a? <编码参数> <临时输�
 
 - 输入不存在或不是普通文件：抛出 `HLSException`。
 - 目标已存在且未指定 `--overwrite`：抛出 `HLSException`。
-- `--segment-time` 小于 1：`parser.error`。
+- HLS 格式下 `--segment-time` 小于 1：`parser.error`；非 HLS 格式忽略该参数。
 - 找不到 `ffmpeg`：与下载流程一致，直接退出并提示安装。
 - FFmpeg 执行失败：沿用 `main()` 对 `subprocess.CalledProcessError` 的统一捕获；FFmpeg 自身错误输出直接显示。
 
