@@ -13,8 +13,8 @@ wheels/
 *.mp4
 *.mkv
 *.webm
-*.m3u8
-*.ts
+playlist.m3u8
+**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts
 *.part
 *.partial.*
 *.hls-cache/

@@ -61,7 +61,7 @@ uv build
 
 ### 转换流程
 
-`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，失败可能丢失旧产物。
+`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，失败可能丢失旧产物。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
 
 ### 任务目录
 
@@ -95,4 +95,4 @@ uv build
 - 只支持 AES-128（identity key format），不处理 SAMPLE-AES 或任何 DRM。
 - 播放列表只抓取一次，不刷新直播/事件播放列表的滑动窗口。
 - `convert` 只接受本地文件；不探测源编码；HLS 转换在 `--overwrite` 时会先删除旧产物，没有整体原子性。
-- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`*.m3u8`、`*.ts`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
+- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
