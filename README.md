@@ -97,7 +97,7 @@ HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重�
 - `-c copy` 时 HLS 分片边界由源关键帧决定，`--segment-time` 只是近似目标。
 - `--encrypt` 仅用于 HLS：输出目录会额外生成 16 字节的 `key.bin`，播放列表通过相对 URI 引用；分发时必须与 `playlist.m3u8` 放在一起。
 - FFmpeg/ffprobe 默认拒绝 `key.bin` 扩展名，本地播放或探测需加 `-allowed_extensions ALL`；浏览器播放器不受此限制。
-- 每次 `--encrypt` 转换都会生成新密钥；未指定 `--overwrite` 时已有 `key.bin` 会阻止转换，指定后会替换旧密钥，需要重新分发 `key.bin`。
+- 每次 `--encrypt` 转换都会生成新密钥；未指定 `--overwrite` 时已有 `key.bin` 或 `.key_info.txt` 会阻止转换，指定后会替换旧密钥，需要重新分发 `key.bin`。
 
 ### 下载参数
 
