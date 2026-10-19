@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 这是一个 HLS 视频下载工具：
 
-- `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装。所有产物写入以输出文件名派生的任务子目录。
+- `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。CLI 通过 argparse 子命令提供 `download`（下载 HLS）与 `convert`（转换本地视频）。下载流程并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装，所有下载产物写入以输出文件名派生的任务子目录。
 - `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
 
 运行环境依赖 `ffmpeg`（需在 PATH 中）和 `uv`。Python 版本固定为 3.12（见 `.python-version`）。
@@ -19,23 +19,31 @@ uv sync
 
 # 主下载器（并发 + 缓存）
 # -o output.mp4 会生成 output/output.mp4 和 output/cache/
-uv run m3u8-cli "<m3u8_url>" -o output.mp4 -j 8
-uv run python -m m3u8_cli "<m3u8_url>" -o output.mp4 -j 8
+uv run m3u8-cli download "<m3u8_url>" -o output.mp4 -j 8
+uv run python -m m3u8_cli download "<m3u8_url>" -o output.mp4 -j 8
 
 # 需要鉴权时
-uv run m3u8-cli "<url>" --referer "<referer>" --cookie "<cookie>"
+uv run m3u8-cli download "<url>" --referer "<referer>" --cookie "<cookie>"
+
+# 转换视频（默认 HLS）
+uv run m3u8-cli convert movie.mp4 -o out
+uv run m3u8-cli convert movie.mp4 -f mkv -c hevc -o out
+
+# 单元测试
+uv run python -m unittest discover -s tests -v
 
 # 打包
 uv build
 ```
 
-仓库目前没有测试、lint 或格式化配置，也没有 CI。
+仓库目前没有 lint 或格式化配置，也没有 CI；单元测试使用标准库 unittest。
 
 ## 架构
 
 ### 模块划分
 
-- `cli.py`：argparse、参数校验、流程编排、`state.json` 指纹处理，并统一捕获 `HLSException` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `cli.py`：argparse 子命令（`download` / `convert`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()`，并统一捕获 `HLSException` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `convert.py`：格式白名单、编码映射、输出路径派生、覆盖检查与 FFmpeg 调用。
 - `playlist.py`：播放列表获取与解析。递归解析 master playlist 并选择 `BANDWIDTH` 最高的变体（最多 5 层），解析 `EXT-X-KEY` / `EXT-X-MAP`，返回分片列表和播放列表原文的 SHA-256 指纹。
 - `downloader.py`：`Downloader` 负责单个 URL 的获取、重试、密钥缓存和 AES-128 解密。每个线程持有自己的 `requests.Session`（`threading.local`）；密钥按 URL 全局缓存并加锁。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
 - `paths.py`：把 `-o` 派生为 `(final, cache_dir)`，并校验任务目录。
@@ -82,4 +90,5 @@ uv build
 - 只支持单个初始化片段；检测到多个不同 `EXT-X-MAP` 会直接报错。
 - 只支持 AES-128（identity key format），不处理 SAMPLE-AES 或任何 DRM。
 - 播放列表只抓取一次，不刷新直播/事件播放列表的滑动窗口。
+- `convert` 只接受本地文件；不探测源编码；HLS 转换没有整体原子性。
 - 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.part`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录或缓存加入 Git。
