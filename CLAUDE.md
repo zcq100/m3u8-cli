@@ -96,4 +96,4 @@ uv build
 - 播放列表只抓取一次，不刷新直播/事件播放列表的滑动窗口。
 - `convert` 只接受本地文件；不探测源编码；HLS 转换在 `--overwrite` 时会先删除旧产物，没有整体原子性。
 - `--encrypt` 仅用于 HLS；密钥与播放列表同目录分发，FFmpeg muxer 使用固定 IV=0，ffprobe 本地验证需 `-allowed_extensions ALL`。
-- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
+- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`key.bin`、`.key_info.txt`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
