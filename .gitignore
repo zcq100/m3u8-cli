@@ -9,9 +9,14 @@ wheels/
 # Virtual environments
 .venv
 
-# 下载产物与缓存
+# 下载与转换产物
 *.mp4
+*.mkv
+*.webm
+playlist.m3u8
+**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts
 *.part
+*.partial.*
 *.hls-cache/
 **/cache/
 output.segments/

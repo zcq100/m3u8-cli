@@ -36,15 +36,18 @@ m3u8-cli convert <input> [-f {hls,mp4,mkv,webm}] [-c {h264,hevc,copy}]
 | webm | `./movie/movie.webm` | `out/movie.webm` |
 
 - HLS 分片编号为 6 位零填充，从 `000000` 开始。
+- 播放列表中的分片 URI 带 `ts/` 前缀（通过 `-hls_base_url ts/`），保证相对路径可被播放器解析。
 - 输出目录按需递归创建；若该路径已存在但不是目录，则报错。
 - 目标路径不得与输入文件相同（例如 `-f mp4 -o .` 且输入就是 `movie.mp4`），否则无论是否指定 `--overwrite` 都报错，避免覆盖源文件。
+- 输入文件不得位于输出目录的 `ts/` 内，否则 `--overwrite` 清理分片时会删除输入；检测到该情况直接报错。
 - 目标存在性判断：
   - HLS：`playlist.m3u8` 或 `ts/` 任一存在即视为已存在；若 `ts` 存在但不是目录，报错。
   - 单文件格式：目标文件存在即视为已存在。
 - 未指定 `--overwrite` 且目标存在时报错退出。
 - 指定 `--overwrite` 时：
-  - HLS 先删除旧的 `playlist.m3u8` 和整个 `ts/`，再开始转换，避免残留旧分片。
+  - HLS 先删除旧的 `playlist.m3u8` 和 `ts/` 中 6 位编号的 `.ts` 文件，再开始转换，避免残留旧分片；`ts/` 中的其他条目保留。
   - 单文件格式先写入同目录的 `<stem>.partial.<ext>`，成功后原子替换目标文件，失败时删除临时文件。
+- `ts/` 不允许是符号链接；未指定 `--overwrite` 时，悬空的目标符号链接也视为已存在；指定 `--overwrite` 时原子替换链接本身，不跟随目标。陈旧的 `.partial.*` 在调用 FFmpeg 前删除。
 
 ## 编码映射
 
@@ -67,7 +70,8 @@ HLS：
 ```
 ffmpeg -hide_banner -y -i <input> -map 0:v? -map 0:a? <编码参数>
   -f hls -hls_time <N> -hls_playlist_type vod -hls_list_size 0
-  -hls_segment_filename <dir>/ts/%06d.ts <dir>/playlist.m3u8
+  -hls_base_url ts/ -hls_segment_filename <dir>/ts/%06d.ts
+  <dir>/playlist.m3u8
 ```
 
 - 重编码（h264/hevc）时追加
@@ -102,7 +106,7 @@ ffmpeg -hide_banner -y -i <input> -map 0:v? -map 0:a? <编码参数> <临时输�
 
 - 输入不存在或不是普通文件：抛出 `HLSException`。
 - 目标已存在且未指定 `--overwrite`：抛出 `HLSException`。
-- `--segment-time` 小于 1：`parser.error`。
+- HLS 格式下 `--segment-time` 小于 1：`parser.error`；非 HLS 格式忽略该参数。
 - 找不到 `ffmpeg`：与下载流程一致，直接退出并提示安装。
 - FFmpeg 执行失败：沿用 `main()` 对 `subprocess.CalledProcessError` 的统一捕获；FFmpeg 自身错误输出直接显示。
 
@@ -113,7 +117,8 @@ ffmpeg -hide_banner -y -i <input> -map 0:v? -map 0:a? <编码参数> <临时输�
 3. 分别转换 `hls`、`mp4`、`mkv`、`webm`，检查目录结构与文件命名。
 4. 用 `ffprobe` 确认 HLS 播放列表和输出文件可读。
 5. 验证默认输出目录、`-o`、`--overwrite`、`-c hevc`、`-c copy` 行为。
-6. `uv run python -m compileall -q src`。
+6. `uv run python -m unittest discover -s tests -v` 全部通过。
+7. `uv run python -m compileall -q src`。
 
 ## 已知取舍
 

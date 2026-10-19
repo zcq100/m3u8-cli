@@ -768,6 +768,16 @@ git commit -m "更新子命令与 convert 文档"
 
 ---
 
+## 执行期间的修正
+
+- HLS 命令增加 `-hls_base_url ts/`：FFmpeg 只把分片 basename 写入播放列表，缺少该参数会导致 `playlist.m3u8` 引用错误路径、产物无法播放。
+- `resolve_output_dir` 把 `mkdir` 的 `OSError` 转换为 `HLSException`。
+- `convert_video` 拒绝输入位于 `<输出目录>/ts` 内的情况，避免 `--overwrite` 清理分片时删除输入。
+- 单文件失败清理只删除普通文件或符号链接，避免目录路径掩盖原始 FFmpeg 错误。
+- 初始测试数由计划中的 16 增至 20，包含一个真实调用 ffmpeg/ffprobe 的 HLS 集成测试。
+
+---
+
 ### Task 6: 端到端验证
 
 **Files:**
