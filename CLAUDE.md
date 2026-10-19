@@ -61,7 +61,7 @@ uv build
 
 ### 转换流程
 
-`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，失败可能丢失旧产物。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
+`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，只删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件，失败可能丢失旧产物；输出路径、临时输出路径和 `ts/` 不允许是符号链接，陈旧的 `.partial.*` 会在调用 FFmpeg 前删除。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
 
 ### 任务目录
 

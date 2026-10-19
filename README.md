@@ -84,7 +84,7 @@ uv run m3u8-cli convert movie.mp4 -f mp4 --overwrite
 | `-f, --format` | `hls` | `hls`、`mp4`、`mkv`、`webm` |
 | `-c, --codec` | `h264` | `h264`、`hevc`、`copy` |
 | `-o, --output-dir` | 输入文件 stem | 输出目录 |
-| `--segment-time` | `6` | 仅 HLS 使用；仍须为正整数 |
+| `--segment-time` | `6` | 仅 HLS 使用 |
 | `--overwrite` | 关闭 | 覆盖已有产物 |
 
 HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重编码时使用 VP9 + Opus，`-c copy` 则直接复制源编码并由 FFmpeg 判断兼容性。
@@ -139,7 +139,7 @@ movie/
 - 播放列表只抓取一次，不刷新直播或事件播放列表的滑动窗口。
 - 不支持多音轨/多字幕轨道的选择性下载。
 - `convert` 仅接受本地文件；`-c copy` 不做源编码兼容性预检。
-- HLS 转换在 `--overwrite` 时会先删除旧 `playlist.m3u8` 和 `ts/`，转换失败将丢失旧产物，并可能留下部分新分片。
+- HLS 转换在 `--overwrite` 时会先删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件；转换失败将丢失旧产物，并可能留下部分新分片。
 
 ## 开发
 

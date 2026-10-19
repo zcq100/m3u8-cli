@@ -194,13 +194,15 @@ def main():
         if args.jobs < 1 or args.timeout < 1 or args.retries < 0:
             parser.error("jobs/timeout 必须为正数，retries 不能为负数")
         handler = run_download
-    else:
-        if args.segment_time < 1:
+    elif args.command == "convert":
+        if args.format == "hls" and args.segment_time < 1:
             parser.error("segment-time 必须为正整数")
         handler = run_convert
+    else:
+        parser.error(f"未知子命令：{args.command}")
 
     try:
         handler(args)
-    except (HLSException, requests.RequestException,
+    except (HLSException, OSError, requests.RequestException,
             subprocess.CalledProcessError) as exc:
         sys.exit(f"\n错误：{exc}")

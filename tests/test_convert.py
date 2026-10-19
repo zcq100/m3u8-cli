@@ -204,6 +204,67 @@ class ConvertVideoTests(unittest.TestCase):
         self.assertIs(run.call_args.kwargs["check"], True)
 
     @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_overwrite_keeps_unrelated_files_in_ts(self, run):
+        out = self.dir / "out"
+        (out / "ts").mkdir(parents=True)
+        (out / "ts" / "000000.ts").write_bytes(b"old")
+        (out / "ts" / "notes.txt").write_text("keep", encoding="utf-8")
+        (out / "playlist.m3u8").write_text("old", encoding="utf-8")
+
+        convert_video(self.input, "hls", "h264", str(out), 6, True)
+
+        self.assertFalse((out / "ts" / "000000.ts").exists())
+        self.assertEqual(
+            (out / "ts" / "notes.txt").read_text(encoding="utf-8"),
+            "keep",
+        )
+
+    def test_ts_symlink_rejected(self):
+        out = self.dir / "out"
+        target = self.dir / "elsewhere"
+        target.mkdir()
+        out.mkdir()
+        (out / "ts").symlink_to(target, target_is_directory=True)
+
+        with self.assertRaises(HLSException):
+            convert_video(self.input, "hls", "h264", str(out), 6, True)
+
+    def test_dangling_playlist_symlink_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "playlist.m3u8").symlink_to(self.dir / "missing.m3u8")
+
+        with self.assertRaises(HLSException):
+            convert_video(self.input, "hls", "h264", str(out), 6, False)
+
+    def test_dangling_output_symlink_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "movie.mkv").symlink_to(self.dir / "missing.mkv")
+
+        with self.assertRaises(HLSException):
+            convert_video(self.input, "mkv", "h264", str(out), 6, False)
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_stale_partial_symlink_removed_before_run(self, run):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "movie.partial.mkv").symlink_to(self.input)
+
+        def fake_run(command, check):
+            partial = Path(command[-1])
+            self.assertFalse(partial.is_symlink())
+            partial.write_bytes(b"new")
+
+        run.side_effect = fake_run
+        result = convert_video(
+            self.input, "mkv", "h264", str(out), 6, False
+        )
+
+        self.assertEqual(self.input.read_bytes(), b"fake")
+        self.assertEqual(result.read_bytes(), b"new")
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
     def test_single_file_uses_partial_then_replace(self, run):
         def fake_run(command, check):
             Path(command[-1]).write_bytes(b"new")

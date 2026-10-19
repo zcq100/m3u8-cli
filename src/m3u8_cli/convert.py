@@ -1,6 +1,5 @@
 """视频格式转换（FFmpeg）。"""
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -102,6 +101,22 @@ def build_file_command(input_path, fmt, codec, partial):
     return command
 
 
+def _clear_hls_output(playlist, segments_dir):
+    """只清理旧播放列表与 6 位编号分片，保留 ts/ 中的其他文件。"""
+    playlist.unlink(missing_ok=True)
+    if not segments_dir.is_dir():
+        return
+    for entry in segments_dir.iterdir():
+        stem = entry.name[:-3]
+        if (
+            entry.name.endswith(".ts")
+            and len(stem) == 6
+            and stem.isdigit()
+            and (entry.is_file() or entry.is_symlink())
+        ):
+            entry.unlink()
+
+
 def convert_video(input_arg, fmt, codec, output_arg,
                   segment_time, overwrite):
     """转换视频并返回最终产物路径。"""
@@ -119,17 +134,23 @@ def convert_video(input_arg, fmt, codec, output_arg,
             raise HLSException(f"输出文件与输入文件相同：{playlist}")
         if segments_dir == input_path or segments_dir in input_path.parents:
             raise HLSException(f"输入文件位于分片目录中：{input_path}")
+        if segments_dir.is_symlink():
+            raise HLSException(f"分片路径是符号链接：{segments_dir}")
         if segments_dir.exists() and not segments_dir.is_dir():
             raise HLSException(f"分片路径不是目录：{segments_dir}")
-        if not overwrite and (playlist.exists() or segments_dir.exists()):
+        if playlist.is_dir():
+            raise HLSException(f"播放列表路径不是文件：{playlist}")
+        if not overwrite and (
+            playlist.exists()
+            or playlist.is_symlink()
+            or segments_dir.exists()
+        ):
             raise HLSException(
                 f"目标已存在：{output_dir}，使用 --overwrite 覆盖"
             )
 
         if overwrite:
-            playlist.unlink(missing_ok=True)
-            if segments_dir.exists():
-                shutil.rmtree(segments_dir)
+            _clear_hls_output(playlist, segments_dir)
         segments_dir.mkdir(parents=True, exist_ok=True)
 
         subprocess.run(
@@ -141,7 +162,9 @@ def convert_video(input_arg, fmt, codec, output_arg,
     output = output_dir / (input_path.stem + FORMAT_SUFFIX[fmt])
     if output == input_path:
         raise HLSException(f"输出文件与输入文件相同：{output}")
-    if output.exists() and not overwrite:
+    if output.is_dir():
+        raise HLSException(f"输出路径是目录：{output}")
+    if not overwrite and (output.exists() or output.is_symlink()):
         raise HLSException(
             f"输出文件已存在：{output}，使用 --overwrite 覆盖"
         )
@@ -149,6 +172,13 @@ def convert_video(input_arg, fmt, codec, output_arg,
     partial = output_dir / (
         input_path.stem + ".partial" + FORMAT_SUFFIX[fmt]
     )
+    if partial.is_symlink():
+        partial.unlink()
+    elif partial.exists():
+        if partial.is_dir():
+            raise HLSException(f"临时输出路径是目录：{partial}")
+        partial.unlink()
+
     try:
         subprocess.run(
             build_file_command(input_path, fmt, codec, partial),
