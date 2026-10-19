@@ -117,6 +117,8 @@ def convert_video(input_arg, fmt, codec, output_arg,
 
         if playlist == input_path:
             raise HLSException(f"输出文件与输入文件相同：{playlist}")
+        if segments_dir == input_path or segments_dir in input_path.parents:
+            raise HLSException(f"输入文件位于分片目录中：{input_path}")
         if segments_dir.exists() and not segments_dir.is_dir():
             raise HLSException(f"分片路径不是目录：{segments_dir}")
         if not overwrite and (playlist.exists() or segments_dir.exists()):
@@ -154,6 +156,7 @@ def convert_video(input_arg, fmt, codec, output_arg,
         )
         partial.replace(output)
     except Exception:
-        partial.unlink(missing_ok=True)
+        if partial.is_file() or partial.is_symlink():
+            partial.unlink()
         raise
     return output

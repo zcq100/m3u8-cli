@@ -201,6 +201,7 @@ class ConvertVideoTests(unittest.TestCase):
         self.assertFalse((out / "playlist.m3u8").exists())
         self.assertTrue((out / "ts").is_dir())
         run.assert_called_once()
+        self.assertIs(run.call_args.kwargs["check"], True)
 
     @mock.patch("m3u8_cli.convert.subprocess.run")
     def test_single_file_uses_partial_then_replace(self, run):
@@ -216,6 +217,33 @@ class ConvertVideoTests(unittest.TestCase):
 
         self.assertEqual(result, out / "movie.mkv")
         self.assertEqual(result.read_bytes(), b"new")
+        self.assertFalse((out / "movie.partial.mkv").exists())
+
+    def test_overwrite_rejects_input_inside_segments_dir(self):
+        out = self.dir / "out"
+        (out / "ts").mkdir(parents=True)
+        input_path = out / "ts" / "000000.ts"
+        input_path.write_bytes(b"input")
+
+        with self.assertRaises(HLSException):
+            convert_video(input_path, "hls", "h264", str(out), 6, True)
+
+        self.assertTrue(input_path.exists())
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_failure_removes_partial(self, run):
+        def fake_run(command, check):
+            Path(command[-1]).write_bytes(b"partial")
+            raise subprocess.CalledProcessError(1, command)
+
+        run.side_effect = fake_run
+        out = self.dir / "out"
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            convert_video(
+                self.input, "mkv", "h264", str(out), 6, False
+            )
+
         self.assertFalse((out / "movie.partial.mkv").exists())
 
     def test_output_equals_input_rejected(self):
