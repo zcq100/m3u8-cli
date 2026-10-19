@@ -174,6 +174,49 @@ class HlsIntegrationTests(unittest.TestCase):
             )
             self.assertIn("hls", probe.stdout)
 
+    def test_encrypt_playlist_references_key(self):
+        """实际调用 FFmpeg，确认播放列表写入 AES-128 密钥信息。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            sample = work / "sample.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-y",
+                    "-f", "lavfi",
+                    "-i", "testsrc2=size=160x120:rate=25",
+                    "-t", "1",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    str(sample),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            out = work / "out"
+            convert_video(sample, "hls", "h264", str(out), 1, True, True)
+
+            playlist = out / "playlist.m3u8"
+            self.assertIn(
+                '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"',
+                playlist.read_text(),
+            )
+            self.assertEqual(len((out / "key.bin").read_bytes()), 16)
+            self.assertFalse((out / ".key_info.txt").exists())
+
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-allowed_extensions", "ALL",
+                    "-show_entries", "format=format_name",
+                    "-of", "default=nw=1",
+                    str(playlist),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("hls", probe.stdout)
+
 
 class ConvertVideoTests(unittest.TestCase):
     def setUp(self):
