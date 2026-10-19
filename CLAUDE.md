@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 仓库概述
 
-这是一个 HLS 视频下载工具：
+这是一个 HLS 视频下载与格式转换工具：
 
 - `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。CLI 通过 argparse 子命令提供 `download`（下载 HLS）与 `convert`（转换本地视频）。下载流程并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装，所有下载产物写入以输出文件名派生的任务子目录。
 - `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
@@ -59,6 +59,10 @@ uv build
 
 合并顺序以播放列表中的分片索引为准，不能用 `as_completed()` 的完成顺序。
 
+### 转换流程
+
+`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，失败可能丢失旧产物。
+
 ### 任务目录
 
 路径由 `paths.resolve_task_paths()` 统一派生：`-o output_2.mp4` 生成任务目录 `output_2/`，最终文件为 `output_2/output_2.mp4`，中间产物在 `output_2/cache/`。若输出路径本身已经是 `<dir>/<dir>.mp4` 形式，则复用该目录，避免重复嵌套。
@@ -90,5 +94,5 @@ uv build
 - 只支持单个初始化片段；检测到多个不同 `EXT-X-MAP` 会直接报错。
 - 只支持 AES-128（identity key format），不处理 SAMPLE-AES 或任何 DRM。
 - 播放列表只抓取一次，不刷新直播/事件播放列表的滑动窗口。
-- `convert` 只接受本地文件；不探测源编码；HLS 转换没有整体原子性。
-- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.part`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录或缓存加入 Git。
+- `convert` 只接受本地文件；不探测源编码；HLS 转换在 `--overwrite` 时会先删除旧产物，没有整体原子性。
+- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`*.m3u8`、`*.ts`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
