@@ -198,6 +198,7 @@ class ConvertVideoTests(unittest.TestCase):
 
         self.assertEqual(result, out / "playlist.m3u8")
         self.assertFalse((out / "ts" / "000000.ts").exists())
+        self.assertFalse((out / "playlist.m3u8").exists())
         self.assertTrue((out / "ts").is_dir())
         run.assert_called_once()
 
