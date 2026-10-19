@@ -79,9 +79,9 @@ uv run m3u8-cli convert movie.mp4 -f mp4 --overwrite
 | `--segment-time` | `6` | HLS 分片秒数，其他格式忽略 |
 | `--overwrite` | 关闭 | 覆盖已有产物 |
 
-HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 会强制使用 VP9 + Opus；`-c copy` 由 FFmpeg 判断源编码是否兼容。
+HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重编码时使用 VP9 + Opus，`-c copy` 则直接复制源编码并由 FFmpeg 判断兼容性。
 
-### 参数
+### 下载参数
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
