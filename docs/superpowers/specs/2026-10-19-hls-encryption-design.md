@@ -40,7 +40,7 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
   ```
 
   第一行写入播放列表，第二行供 FFmpeg 本地读取。
-- 不写入 IV 行，由 FFmpeg 按 HLS 规范使用分片媒体序列号作为 IV。
+- 不提供 IV 输入；FFmpeg 会写入固定 `IV=0`，同一密钥与 IV 应用于所有分片（见已知取舍）。
 - `.key_info.txt` 在转换成功或失败后都删除。
 
 ## FFmpeg 调用
@@ -55,7 +55,8 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
 
 ## 覆盖与安全
 
-- 开启 `--encrypt` 时，`key.bin` 纳入“目标已存在”判断：未指定 `--overwrite` 且 `playlist.m3u8`、`ts/` 或 `key.bin` 任一存在时报错。
+- 开启 `--encrypt` 时，`key.bin` 与 `.key_info.txt` 纳入“目标已存在”判断：未指定 `--overwrite` 且 `playlist.m3u8`、`ts/`、`key.bin` 或 `.key_info.txt` 任一存在时报错。
+- 输入文件不得是输出目录中的 `key.bin` 或 `.key_info.txt`，否则报错，避免生成的密钥产物覆盖源文件。
 - `--overwrite` 时先删除旧播放列表与 6 位编号分片，生成新密钥并覆盖 `key.bin`。
 - `key.bin` 是符号链接时：
   - 未指定 `--overwrite`：视为已存在，报错。
@@ -95,7 +96,7 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
    - `--encrypt` 转换后播放列表包含
      `#EXT-X-KEY:METHOD=AES-128,URI="key.bin"`；
    - `key.bin` 为 16 字节；
-   - `ffprobe` 能读取加密后的播放列表。
+   - `ffprobe` 能读取加密后的播放列表（必须传 `-allowed_extensions ALL`，否则默认拒绝 `key.bin` 扩展名）。
 3. 全量 `uv run python -m unittest discover -s tests -v` 通过。
 
 ## 文档
@@ -108,4 +109,6 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
 
 - 密钥与播放列表同目录分发，这是标准 HLS AES-128 的常见做法，不是 DRM；能访问 `key.bin` 的客户端即可解密。
 - 不提供自定义密钥、密钥 URI 或 IV 的参数。
+- FFmpeg 的 HLS muxer 会写入固定的 `IV=0`，所有分片共用同一密钥与 IV；这是该实现方式的已知限制。
+- FFmpeg/ffprobe 默认拒绝 `key.bin` 扩展名，本地播放或探测需加 `-allowed_extensions ALL`；浏览器播放器不受此限制。
 - 不实现 SAMPLE-AES 或任何 DRM。

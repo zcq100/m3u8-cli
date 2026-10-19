@@ -106,6 +106,26 @@ class CommandTests(unittest.TestCase):
         self.assertIn("hvc1", command)
         self.assertIn("+faststart", command)
 
+    def test_hls_encrypt_adds_key_info_file(self):
+        command = build_hls_command(
+            Path("/videos/movie.mp4"), Path("/out"), "h264", 6,
+            encrypt=True,
+        )
+        self.assertIn("-hls_key_info_file", command)
+        index = command.index("-hls_key_info_file")
+        self.assertEqual(command[index + 1], "/out/.key_info.txt")
+        self.assertLess(
+            command.index("-hls_key_info_file"),
+            command.index("-hls_segment_filename"),
+        )
+        self.assertEqual(command[-1], "/out/playlist.m3u8")
+
+    def test_hls_without_encrypt_has_no_key_info(self):
+        command = build_hls_command(
+            Path("/videos/movie.mp4"), Path("/out"), "h264", 6
+        )
+        self.assertNotIn("-hls_key_info_file", command)
+
 
 @unittest.skipUnless(
     shutil.which("ffmpeg") and shutil.which("ffprobe"),
@@ -144,6 +164,49 @@ class HlsIntegrationTests(unittest.TestCase):
             probe = subprocess.run(
                 [
                     "ffprobe", "-v", "error",
+                    "-show_entries", "format=format_name",
+                    "-of", "default=nw=1",
+                    str(playlist),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("hls", probe.stdout)
+
+    def test_encrypt_playlist_references_key(self):
+        """实际调用 FFmpeg，确认播放列表写入 AES-128 密钥信息。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            sample = work / "sample.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-y",
+                    "-f", "lavfi",
+                    "-i", "testsrc2=size=160x120:rate=25",
+                    "-t", "1",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    str(sample),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            out = work / "out"
+            convert_video(sample, "hls", "h264", str(out), 1, True, True)
+
+            playlist = out / "playlist.m3u8"
+            self.assertIn(
+                '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"',
+                playlist.read_text(),
+            )
+            self.assertEqual(len((out / "key.bin").read_bytes()), 16)
+            self.assertFalse((out / ".key_info.txt").exists())
+
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-allowed_extensions", "ALL",
                     "-show_entries", "format=format_name",
                     "-of", "default=nw=1",
                     str(playlist),
@@ -323,6 +386,169 @@ class ConvertVideoTests(unittest.TestCase):
             convert_video(
                 self.input, "mp4", "h264", str(self.dir), 6, True
             )
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_encrypt_writes_key_and_cleans_key_info(self, run):
+        out = self.dir / "out"
+        captured = {}
+
+        def fake_run(command, check):
+            captured["info"] = (out / ".key_info.txt").read_text(
+                encoding="utf-8"
+            )
+
+        run.side_effect = fake_run
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, False, True
+        )
+
+        self.assertEqual(
+            captured["info"],
+            f"key.bin\n{out.resolve() / 'key.bin'}\n",
+        )
+        self.assertEqual(len((out / "key.bin").read_bytes()), 16)
+        self.assertFalse((out / ".key_info.txt").exists())
+        command = run.call_args.args[0]
+        self.assertIn("-hls_key_info_file", command)
+
+    def test_overwrite_key_dir_does_not_destroy_old_output(self):
+        out = self.dir / "out"
+        (out / "ts").mkdir(parents=True)
+        (out / "playlist.m3u8").write_text("old", encoding="utf-8")
+        (out / "ts" / "000000.ts").write_bytes(b"old")
+        (out / "key.bin").mkdir()
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, True, True
+            )
+
+        self.assertTrue((out / "playlist.m3u8").exists())
+        self.assertTrue((out / "ts" / "000000.ts").exists())
+
+    def test_encrypt_requires_hls(self):
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "mp4", "h264", str(self.dir / "out"), 6,
+                False, True,
+            )
+
+    def test_encrypt_existing_key_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "key.bin").write_bytes(b"x" * 16)
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, False, True
+            )
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_encrypt_overwrite_generates_new_key(self, run):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "key.bin").write_bytes(b"old-key")
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, True, True
+        )
+        first = (out / "key.bin").read_bytes()
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, True, True
+        )
+        second = (out / "key.bin").read_bytes()
+
+        self.assertEqual(len(first), 16)
+        self.assertEqual(len(second), 16)
+        self.assertNotEqual(first, second)
+
+    def test_encrypt_key_symlink_without_overwrite_rejected(self):
+        out = self.dir / "out"
+        out.mkdir()
+        target = self.dir / "real-key.bin"
+        target.write_bytes(b"x" * 16)
+        (out / "key.bin").symlink_to(target)
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, False, True
+            )
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_encrypt_overwrite_replaces_key_symlink(self, run):
+        out = self.dir / "out"
+        out.mkdir()
+        target = self.dir / "real-key.bin"
+        target.write_bytes(b"target")
+        (out / "key.bin").symlink_to(target)
+
+        convert_video(
+            self.input, "hls", "h264", str(out), 6, True, True
+        )
+
+        key = out / "key.bin"
+        self.assertFalse(key.is_symlink())
+        self.assertEqual(len(key.read_bytes()), 16)
+        self.assertEqual(target.read_bytes(), b"target")
+
+    def test_encrypt_failure_cleans_key_and_key_info(self):
+        out = self.dir / "out"
+
+        def fake_run(command, check):
+            self.assertTrue((out / ".key_info.txt").exists())
+            raise subprocess.CalledProcessError(1, command)
+
+        with mock.patch(
+            "m3u8_cli.convert.subprocess.run", side_effect=fake_run
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                convert_video(
+                    self.input, "hls", "h264", str(out), 6, False, True
+                )
+
+        self.assertFalse((out / "key.bin").exists())
+        self.assertFalse((out / ".key_info.txt").exists())
+
+    def test_encrypt_input_named_key_bin_rejected(self):
+        out = self.dir / "out"
+        out.mkdir()
+        input_path = out / "key.bin"
+        input_path.write_bytes(b"input")
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                input_path, "hls", "h264", str(out), 6, True, True
+            )
+
+        self.assertEqual(input_path.read_bytes(), b"input")
+
+    def test_encrypt_input_named_key_info_rejected(self):
+        out = self.dir / "out"
+        out.mkdir()
+        input_path = out / ".key_info.txt"
+        input_path.write_bytes(b"input")
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                input_path, "hls", "h264", str(out), 6, True, True
+            )
+
+        self.assertEqual(input_path.read_bytes(), b"input")
+
+    def test_encrypt_existing_key_info_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        key_info = out / ".key_info.txt"
+        key_info.write_text("keep", encoding="utf-8")
+
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "hls", "h264", str(out), 6, False, True
+            )
+
+        self.assertEqual(key_info.read_text(encoding="utf-8"), "keep")
 
 
 if __name__ == "__main__":
