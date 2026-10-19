@@ -40,7 +40,7 @@ m3u8-cli convert <input> -f hls --encrypt [其他参数]
   ```
 
   第一行写入播放列表，第二行供 FFmpeg 本地读取。
-- 不写入 IV 行，由 FFmpeg 按 HLS 规范使用分片媒体序列号作为 IV。
+- 不提供 IV 输入；FFmpeg 会写入固定 `IV=0`，同一密钥与 IV 应用于所有分片（见已知取舍）。
 - `.key_info.txt` 在转换成功或失败后都删除。
 
 ## FFmpeg 调用
