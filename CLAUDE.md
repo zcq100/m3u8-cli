@@ -61,7 +61,7 @@ uv build
 
 ### 转换流程
 
-`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；`--encrypt` 时额外生成 16 字节 `key.bin`，并通过临时 `.key_info.txt` 交给 `-hls_key_info_file` 做 AES-128 加密，转换结束删除临时文件（转换失败时同时删除新写入的 `key.bin`）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，只删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件，失败可能丢失旧产物；`ts/` 不允许是符号链接，未指定 `--overwrite` 时悬空的目标符号链接也视为已存在，指定时原子替换链接本身而不跟随目标；陈旧的 `.partial.*` 会在调用 FFmpeg 前删除。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
+`convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；`--encrypt` 时额外生成 16 字节 `key.bin`，并通过临时 `.key_info.txt` 交给 `-hls_key_info_file` 做 AES-128 加密，转换结束删除临时文件（转换失败时同时删除新写入的 `key.bin`）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，只删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件（`--encrypt` 时 `key.bin` 随后被新密钥覆盖；转换失败时新密钥也会被删除），失败可能丢失旧产物；`ts/` 不允许是符号链接，未指定 `--overwrite` 时悬空的目标符号链接也视为已存在，指定时原子替换链接本身而不跟随目标；陈旧的 `.partial.*` 会在调用 FFmpeg 前删除。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
 
 ### 任务目录
 
@@ -95,5 +95,5 @@ uv build
 - 只支持 AES-128（identity key format），不处理 SAMPLE-AES 或任何 DRM。
 - 播放列表只抓取一次，不刷新直播/事件播放列表的滑动窗口。
 - `convert` 只接受本地文件；不探测源编码；HLS 转换在 `--overwrite` 时会先删除旧产物，没有整体原子性。
-- `--encrypt` 仅用于 HLS；密钥与播放列表同目录分发，FFmpeg muxer 使用固定 IV=0，ffprobe 本地验证需 `-allowed_extensions ALL`。AES-128 加密不是 DRM：能访问 `key.bin` 的客户端即可解密。
+- `--encrypt` 仅用于 HLS；密钥与播放列表同目录分发，FFmpeg muxer 使用固定 IV=0，本地播放/探测需 `-allowed_extensions ALL`。AES-128 加密不是 DRM：能访问 `key.bin` 的客户端即可解密。
 - 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`key.bin`、`.key_info.txt`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
