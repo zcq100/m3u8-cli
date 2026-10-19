@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 from unittest import mock
 
@@ -52,15 +54,33 @@ class ConvertParserTests(unittest.TestCase):
 
 class MainValidationTests(unittest.TestCase):
     def test_encrypt_rejected_for_non_hls(self):
-        with mock.patch(
-            "sys.argv",
-            [
-                "m3u8-cli", "convert", "movie.mp4",
-                "-f", "mp4", "--encrypt",
-            ],
-        ):
-            with self.assertRaises(SystemExit):
+        with mock.patch("m3u8_cli.cli.convert_video") as convert, \
+                mock.patch(
+                    "sys.argv",
+                    [
+                        "m3u8-cli", "convert", "movie.mp4",
+                        "-f", "mp4", "--encrypt",
+                    ],
+                ), contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as ctx:
                 main()
+
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertIn("--encrypt 仅适用于 HLS", stderr.getvalue())
+        convert.assert_not_called()
+
+    def test_encrypt_passed_to_convert_video(self):
+        with mock.patch("m3u8_cli.cli.convert_video") as convert, \
+                mock.patch(
+                    "m3u8_cli.cli.shutil.which",
+                    return_value="/usr/bin/ffmpeg",
+                ), mock.patch(
+                    "sys.argv",
+                    ["m3u8-cli", "convert", "movie.mp4", "--encrypt"],
+                ):
+            main()
+
+        self.assertTrue(convert.call_args.args[6])
 
 
 if __name__ == "__main__":

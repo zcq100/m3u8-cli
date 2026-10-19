@@ -479,7 +479,7 @@ Expected: FAIL，`convert` 解析结果没有 `encrypt` 属性 / `--encrypt` 不
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `uv run python -m unittest discover -s tests -v`
-Expected: `Ran 38 tests ... OK`
+Expected: `Ran 39 tests ... OK`
 
 再运行：
 
@@ -559,7 +559,7 @@ Run: `uv run python -m unittest tests.test_convert.HlsIntegrationTests -v`
 Expected: 2 tests OK
 
 全量：`uv run python -m unittest discover -s tests -v`
-Expected: `Ran 39 tests ... OK`
+Expected: `Ran 40 tests ... OK`
 
 - [ ] **Step 3: 提交**
 
@@ -646,7 +646,7 @@ git commit -m "更新 HLS 加密文档与忽略规则"
 - FFmpeg 的 HLS muxer 写入固定 `IV=0`，所有分片共用同一密钥与 IV，已记录为已知限制。
 - `key.bin` / `.key_info.txt` 的目录形态在破坏性清理前校验，避免 `--overwrite` 先删旧产物再报错。
 - key-info 清理移入 `finally`，覆盖 `KeyboardInterrupt`。
-- 测试总数因新增“清理前校验”用例增加 1：Task 2 后为 36，Task 3 后为 38，Task 4 后为 39。
+- 测试总数因新增“清理前校验”用例增加 1：Task 2 后为 36，Task 3 后为 39，Task 4 后为 40。
 
 ---
 
@@ -714,4 +714,4 @@ uv run python -m compileall -q src
 git status --short
 ```
 
-Expected: 39 tests OK；compileall 无输出；工作区干净。
+Expected: 40 tests OK；compileall 无输出；工作区干净。
