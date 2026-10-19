@@ -106,6 +106,21 @@ class CommandTests(unittest.TestCase):
         self.assertIn("hvc1", command)
         self.assertIn("+faststart", command)
 
+    def test_hls_encrypt_adds_key_info_file(self):
+        command = build_hls_command(
+            Path("/videos/movie.mp4"), Path("/out"), "h264", 6,
+            encrypt=True,
+        )
+        self.assertIn("-hls_key_info_file", command)
+        index = command.index("-hls_key_info_file")
+        self.assertEqual(command[index + 1], "/out/.key_info.txt")
+
+    def test_hls_without_encrypt_has_no_key_info(self):
+        command = build_hls_command(
+            Path("/videos/movie.mp4"), Path("/out"), "h264", 6
+        )
+        self.assertNotIn("-hls_key_info_file", command)
+
 
 @unittest.skipUnless(
     shutil.which("ffmpeg") and shutil.which("ffprobe"),

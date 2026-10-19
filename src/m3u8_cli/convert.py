@@ -56,7 +56,8 @@ def codec_args(fmt, codec):
     return CODEC_ARGS[codec]
 
 
-def build_hls_command(input_path, output_dir, codec, segment_time):
+def build_hls_command(input_path, output_dir, codec, segment_time,
+                      encrypt=False):
     """构造 HLS 转换的 FFmpeg 命令。"""
     command = [
         "ffmpeg", "-hide_banner", "-y",
@@ -77,6 +78,15 @@ def build_hls_command(input_path, output_dir, codec, segment_time):
         "-hls_playlist_type", "vod",
         "-hls_list_size", "0",
         "-hls_base_url", "ts/",
+    ]
+
+    if encrypt:
+        command += [
+            "-hls_key_info_file",
+            str(output_dir / ".key_info.txt"),
+        ]
+
+    command += [
         "-hls_segment_filename", str(output_dir / "ts" / "%06d.ts"),
         str(output_dir / "playlist.m3u8"),
     ]
