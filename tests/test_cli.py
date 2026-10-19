@@ -77,7 +77,7 @@ class MainValidationTests(unittest.TestCase):
                 ), mock.patch(
                     "sys.argv",
                     ["m3u8-cli", "convert", "movie.mp4", "--encrypt"],
-                ):
+                ), contextlib.redirect_stdout(io.StringIO()):
             main()
 
         self.assertTrue(convert.call_args.args[6])
