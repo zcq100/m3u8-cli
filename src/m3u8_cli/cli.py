@@ -71,6 +71,10 @@ def build_parser():
         "--overwrite", action="store_true",
         help="覆盖已有产物",
     )
+    convert.add_argument(
+        "--encrypt", action="store_true",
+        help="为 HLS 分片启用 AES-128 加密",
+    )
     return parser
 
 
@@ -182,6 +186,7 @@ def run_convert(args):
         args.output_dir,
         args.segment_time,
         args.overwrite,
+        args.encrypt,
     )
     print(f"完成：{output}")
 
@@ -195,6 +200,8 @@ def main():
             parser.error("jobs/timeout 必须为正数，retries 不能为负数")
         handler = run_download
     elif args.command == "convert":
+        if args.encrypt and args.format != "hls":
+            parser.error("--encrypt 仅适用于 HLS")
         if args.format == "hls" and args.segment_time < 1:
             parser.error("segment-time 必须为正整数")
         handler = run_convert

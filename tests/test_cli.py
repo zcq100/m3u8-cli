@@ -1,6 +1,7 @@
 import unittest
+from unittest import mock
 
-from m3u8_cli.cli import build_parser
+from m3u8_cli.cli import build_parser, main
 
 
 class DownloadParserTests(unittest.TestCase):
@@ -28,6 +29,7 @@ class ConvertParserTests(unittest.TestCase):
         self.assertIsNone(args.output_dir)
         self.assertEqual(args.segment_time, 6)
         self.assertFalse(args.overwrite)
+        self.assertFalse(args.encrypt)
 
     def test_convert_choices(self):
         args = build_parser().parse_args([
@@ -40,6 +42,25 @@ class ConvertParserTests(unittest.TestCase):
         self.assertEqual(args.output_dir, "out")
         self.assertEqual(args.segment_time, 10)
         self.assertTrue(args.overwrite)
+
+    def test_convert_encrypt_flag(self):
+        args = build_parser().parse_args(
+            ["convert", "movie.mp4", "--encrypt"]
+        )
+        self.assertTrue(args.encrypt)
+
+
+class MainValidationTests(unittest.TestCase):
+    def test_encrypt_rejected_for_non_hls(self):
+        with mock.patch(
+            "sys.argv",
+            [
+                "m3u8-cli", "convert", "movie.mp4",
+                "-f", "mp4", "--encrypt",
+            ],
+        ):
+            with self.assertRaises(SystemExit):
+                main()
 
 
 if __name__ == "__main__":
