@@ -1,5 +1,7 @@
 """视频格式转换（FFmpeg）。"""
 
+import shutil
+import subprocess
 from pathlib import Path
 
 from .errors import HLSException
@@ -98,3 +100,60 @@ def build_file_command(input_path, fmt, codec, partial):
 
     command.append(str(partial))
     return command
+
+
+def convert_video(input_arg, fmt, codec, output_arg,
+                  segment_time, overwrite):
+    """转换视频并返回最终产物路径。"""
+    input_path = Path(input_arg).expanduser().resolve()
+    if not input_path.is_file():
+        raise HLSException(f"输入文件不存在：{input_path}")
+
+    output_dir = resolve_output_dir(input_path, output_arg)
+
+    if fmt == "hls":
+        playlist = output_dir / "playlist.m3u8"
+        segments_dir = output_dir / "ts"
+
+        if playlist == input_path:
+            raise HLSException(f"输出文件与输入文件相同：{playlist}")
+        if segments_dir.exists() and not segments_dir.is_dir():
+            raise HLSException(f"分片路径不是目录：{segments_dir}")
+        if not overwrite and (playlist.exists() or segments_dir.exists()):
+            raise HLSException(
+                f"目标已存在：{output_dir}，使用 --overwrite 覆盖"
+            )
+
+        if overwrite:
+            playlist.unlink(missing_ok=True)
+            if segments_dir.exists():
+                shutil.rmtree(segments_dir)
+        segments_dir.mkdir(parents=True, exist_ok=True)
+
+        subprocess.run(
+            build_hls_command(input_path, output_dir, codec, segment_time),
+            check=True,
+        )
+        return playlist
+
+    output = output_dir / (input_path.stem + FORMAT_SUFFIX[fmt])
+    if output == input_path:
+        raise HLSException(f"输出文件与输入文件相同：{output}")
+    if output.exists() and not overwrite:
+        raise HLSException(
+            f"输出文件已存在：{output}，使用 --overwrite 覆盖"
+        )
+
+    partial = output_dir / (
+        input_path.stem + ".partial" + FORMAT_SUFFIX[fmt]
+    )
+    try:
+        subprocess.run(
+            build_file_command(input_path, fmt, codec, partial),
+            check=True,
+        )
+        partial.replace(output)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
+    return output

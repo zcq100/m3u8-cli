@@ -4,10 +4,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from m3u8_cli.convert import (
     build_file_command,
     build_hls_command,
+    convert_video,
     resolve_output_dir,
 )
 from m3u8_cli.errors import HLSException
@@ -151,6 +153,75 @@ class HlsIntegrationTests(unittest.TestCase):
                 text=True,
             )
             self.assertIn("hls", probe.stdout)
+
+
+class ConvertVideoTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.input = self.dir / "movie.mp4"
+        self.input.write_bytes(b"fake")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_missing_input(self):
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.dir / "missing.mp4", "hls", "h264", None, 6, False
+            )
+
+    def test_hls_existing_target_without_overwrite(self):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "playlist.m3u8").write_text("old", encoding="utf-8")
+        with self.assertRaises(HLSException):
+            convert_video(self.input, "hls", "h264", str(out), 6, False)
+
+    def test_ts_path_is_file(self):
+        out = self.dir / "out"
+        out.mkdir()
+        (out / "ts").write_bytes(b"not a dir")
+        with self.assertRaises(HLSException):
+            convert_video(self.input, "hls", "h264", str(out), 6, True)
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_hls_overwrite_clears_old_segments(self, run):
+        out = self.dir / "out"
+        (out / "ts").mkdir(parents=True)
+        (out / "ts" / "000000.ts").write_bytes(b"old")
+        (out / "playlist.m3u8").write_text("old", encoding="utf-8")
+
+        result = convert_video(
+            self.input, "hls", "h264", str(out), 6, True
+        )
+
+        self.assertEqual(result, out / "playlist.m3u8")
+        self.assertFalse((out / "ts" / "000000.ts").exists())
+        self.assertTrue((out / "ts").is_dir())
+        run.assert_called_once()
+
+    @mock.patch("m3u8_cli.convert.subprocess.run")
+    def test_single_file_uses_partial_then_replace(self, run):
+        def fake_run(command, check):
+            Path(command[-1]).write_bytes(b"new")
+
+        run.side_effect = fake_run
+        out = self.dir / "out"
+
+        result = convert_video(
+            self.input, "mkv", "h264", str(out), 6, False
+        )
+
+        self.assertEqual(result, out / "movie.mkv")
+        self.assertEqual(result.read_bytes(), b"new")
+        self.assertFalse((out / "movie.partial.mkv").exists())
+
+    def test_output_equals_input_rejected(self):
+        with self.assertRaises(HLSException):
+            convert_video(
+                self.input, "mp4", "h264", str(self.dir), 6, True
+            )
 
 
 if __name__ == "__main__":
