@@ -86,11 +86,14 @@ uv run m3u8-cli convert movie.mp4 -f mp4 --overwrite
 | `-o, --output-dir` | 输入文件 stem | 输出目录 |
 | `--segment-time` | `6` | 仅 HLS 使用 |
 | `--overwrite` | 关闭 | 覆盖已有产物 |
+| `--encrypt` | 关闭 | 仅 HLS；生成 `key.bin` 并加密分片 |
 
 HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重编码时使用 VP9 + Opus，`-c copy` 则直接复制源编码并由 FFmpeg 判断兼容性。
 
 - `mp4`/`mkv`/`webm` 输出为 `<输出目录>/<输入文件 stem>.<扩展名>`，例如 `m3u8-cli convert movie.mp4 -f mkv -o out` 生成 `out/movie.mkv`；单文件先写入 `.partial.*`，成功后原子替换。
 - `-c copy` 时 HLS 分片边界由源关键帧决定，`--segment-time` 只是近似目标。
+- `--encrypt` 仅用于 HLS：输出目录会额外生成 16 字节的 `key.bin`，播放列表通过相对 URI 引用；分发时必须与 `playlist.m3u8` 放在一起。
+- FFmpeg/ffprobe 默认拒绝 `key.bin` 扩展名，本地播放或探测需加 `-allowed_extensions ALL`；浏览器播放器不受此限制。
 
 ### 下载参数
 
@@ -140,6 +143,8 @@ movie/
 - 不支持多音轨/多字幕轨道的选择性下载。
 - `convert` 仅接受本地文件；`-c copy` 不做源编码兼容性预检。
 - HLS 转换在 `--overwrite` 时会先删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件；转换失败将丢失旧产物，并可能留下部分新分片。
+- HLS AES-128 加密不是 DRM；能访问 `key.bin` 的客户端即可解密。
+- FFmpeg 的 HLS muxer 会写入固定 `IV=0`，所有分片共用同一密钥与 IV。
 
 ## 开发
 
