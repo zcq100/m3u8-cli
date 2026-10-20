@@ -62,19 +62,28 @@ def load_playlist(url, headers, timeout, depth=0):
             variants[0][1], headers, timeout, depth + 1
         )
 
-    sequence = 0
+    media_sequence = 0
     key = None
     current_map = None
     segments = []
     maps = []
     pending_map = None
+    pending_duration = 0.0
 
     for line in lines:
         if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
             try:
-                sequence = int(line.split(":", 1)[1])
+                media_sequence = int(line.split(":", 1)[1])
             except ValueError as exc:
                 raise HLSException("无效的 MEDIA-SEQUENCE") from exc
+
+        elif line.startswith("#EXTINF:"):
+            try:
+                pending_duration = float(
+                    line.split(":", 1)[1].split(",", 1)[0]
+                )
+            except ValueError as exc:
+                raise HLSException("无效的 EXTINF") from exc
 
         elif line.startswith("#EXT-X-KEY:"):
             attrs = parse_attrs(line)
@@ -123,10 +132,12 @@ def load_playlist(url, headers, timeout, depth=0):
 
             segments.append({
                 "url": urljoin(url, line),
-                "sequence": sequence + len(segments),
+                "sequence": media_sequence + len(segments),
+                "duration": pending_duration,
                 "key": segment_key,
                 "map": segment_map,
             })
+            pending_duration = 0.0
 
     if not segments:
         raise HLSException("播放列表中没有媒体分片")
@@ -144,6 +155,7 @@ def load_playlist(url, headers, timeout, depth=0):
         "playlist_url": url,
         "segments": segments,
         "maps": maps,
+        "media_sequence": media_sequence,
         "fingerprint": hashlib.sha256(
             text.encode("utf-8")
         ).hexdigest(),
