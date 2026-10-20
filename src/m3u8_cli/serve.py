@@ -76,6 +76,7 @@ class TaskManager:
             if state_file is not None
             else self.output_dir / ".m3u8-serve-state.json"
         )
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.runner = runner or download_hls
 
         self.lock = threading.RLock()
@@ -97,12 +98,14 @@ class TaskManager:
     def _task_paths(self, fmt, output):
         if fmt == "mp4":
             final, cache = derive_task_paths(self.output_dir / output)
-            return final, cache.parent
+            return cache.parent / final.name, cache.parent
         task_dir = (self.output_dir / output).resolve()
         return task_dir / "playlist.m3u8", task_dir
 
     def submit(self, *, url, fmt, output, jobs, retries, timeout,
                overwrite, headers):
+        if fmt not in ("mp4", "hls"):
+            raise RequestError(f"不支持的格式：{fmt}")
         if (
             not output
             or Path(output).name != output
@@ -170,6 +173,7 @@ class TaskManager:
             params = self._params.pop(task_id, None)
             cancel = self._cancels.get(task_id)
         if params is None or cancel is None:
+            self._finish(task_id, "failed", error="任务参数缺失")
             return
 
         options = DownloadOptions(**params)
