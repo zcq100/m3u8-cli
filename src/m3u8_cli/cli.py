@@ -82,7 +82,7 @@ def run_download(args):
     if args.format == "mp4" and not shutil.which("ffmpeg"):
         sys.exit("请先安装 ffmpeg")
 
-    output_arg = args.output or (
+    output_arg = args.output if args.output is not None else (
         "output" if args.format == "hls" else "output.mp4"
     )
 

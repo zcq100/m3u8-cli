@@ -73,7 +73,7 @@ def download_hls(options, on_progress=None, cancel=None):
     previous = _load_state(state_file)
     if previous and (
         previous.get("fingerprint") != fingerprint
-        or previous.get("mode") != options.format
+        or previous.get("mode", "mp4") != options.format
     ):
         print("播放列表或输出模式已变化，清除旧分片缓存")
         for p in cache.glob("segment_*.bin"):
@@ -129,7 +129,7 @@ def download_hls(options, on_progress=None, cancel=None):
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=options.jobs
     ) as pool:
-        pending = {}
+        pending = set()
         iterator = iter(jobs)
 
         def submit_next():
@@ -145,7 +145,7 @@ def download_hls(options, on_progress=None, cancel=None):
                 segment["sequence"],
                 decrypt,
             )
-            pending[future] = (i, segment, path)
+            pending.add(future)
             return True
 
         try:
@@ -160,7 +160,7 @@ def download_hls(options, on_progress=None, cancel=None):
                     return_when=concurrent.futures.FIRST_COMPLETED,
                 )
                 for future in done:
-                    pending.pop(future)
+                    pending.discard(future)
                     future.result()
                     completed += 1
                     if on_progress is not None:

@@ -1,9 +1,37 @@
 import contextlib
 import io
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from m3u8_cli.cli import build_parser, main
+
+
+class DownloadFlowTests(unittest.TestCase):
+    def _run(self, argv, fmt):
+        with mock.patch(
+            "m3u8_cli.cli.download_hls"
+        ) as download, mock.patch(
+            "m3u8_cli.cli.shutil.which",
+            return_value="/usr/bin/ffmpeg",
+        ), mock.patch("sys.argv", argv), \
+                contextlib.redirect_stdout(io.StringIO()):
+            main()
+
+        options = download.call_args.args[0]
+        self.assertEqual(options.output, Path("output.mp4")
+                         if fmt == "mp4" else Path("output"))
+
+    def test_mp4_default_output(self):
+        self._run(["m3u8-cli", "download", "https://example.com/a.m3u8"],
+                  "mp4")
+
+    def test_hls_default_output(self):
+        self._run(
+            ["m3u8-cli", "download", "https://example.com/a.m3u8",
+             "-f", "hls"],
+            "hls",
+        )
 
 
 class DownloadParserTests(unittest.TestCase):

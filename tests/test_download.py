@@ -128,6 +128,42 @@ class DownloadCoreTests(unittest.TestCase):
             self.assertEqual(state["mode"], "mp4")
             self.assertFalse((cache / "segment_000000.bin").exists())
 
+    def test_cancel_during_download_keeps_completed_segments(self):
+        cancel = threading.Event()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "movie"
+
+            def progress(done, total):
+                if done == 1:
+                    cancel.set()
+
+            with mock.patch(
+                "m3u8_cli.download.load_playlist",
+                return_value=make_playlist(segments=5),
+            ), mock.patch(
+                "m3u8_cli.download.Downloader", FakeDownloader
+            ), mock.patch(
+                "m3u8_cli.download.export_hls"
+            ) as export:
+                with self.assertRaises(DownloadCancelled):
+                    download_hls(
+                        DownloadOptions(
+                            url="https://example.com/a.m3u8",
+                            output=output,
+                            format="hls",
+                            jobs=1,
+                        ),
+                        on_progress=progress,
+                        cancel=cancel,
+                    )
+
+            export.assert_not_called()
+            cache = output / "cache"
+            self.assertTrue((cache / "segment_000000.bin").is_file())
+            self.assertFalse((cache / "segment_000002.bin").exists())
+            self.assertFalse((output / "playlist.m3u8").exists())
+
     def test_hls_flow_keeps_raw_segments_and_keys(self):
         key = {
             "method": "AES-128",
