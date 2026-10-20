@@ -1,15 +1,18 @@
 """RESTful 下载服务。"""
 
+import hmac
 import json
 import secrets
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from .download import DownloadOptions, download_hls
-from .errors import DownloadCancelled
+from .errors import DownloadCancelled, HLSException
 from .paths import derive_task_paths
 
 KEEP_TERMINAL = 200
@@ -359,3 +362,291 @@ class TaskManager:
 
         with self.lock:
             self._save_locked()
+
+
+MAX_BODY = 1024 * 1024
+MAX_HEADERS_BYTES = 16 * 1024
+
+
+def _int_field(payload, name, default, minimum, maximum):
+    value = payload.get(name, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RequestError(f"{name} 必须是整数")
+    if value < minimum or value > maximum:
+        raise RequestError(
+            f"{name} 必须在 {minimum} 到 {maximum} 之间"
+        )
+    return value
+
+
+def parse_task_request(payload, default_jobs=8):
+    """校验 POST /api/tasks 的请求体并返回 submit 参数。"""
+    if not isinstance(payload, dict):
+        raise RequestError("请求体必须是 JSON 对象")
+
+    url = payload.get("url")
+    if not isinstance(url, str) or not url:
+        raise RequestError("url 不能为空")
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise RequestError("url 必须是 http 或 https 地址")
+
+    fmt = payload.get("format", "mp4")
+    if fmt not in ("mp4", "hls"):
+        raise RequestError("format 必须是 mp4 或 hls")
+
+    output = payload.get("output")
+    if output is None:
+        output = "output" if fmt == "hls" else "output.mp4"
+    if not valid_output_name(output):
+        raise RequestError("output 必须是纯文件名")
+
+    overwrite = payload.get("overwrite", False)
+    if not isinstance(overwrite, bool):
+        raise RequestError("overwrite 必须是布尔值")
+
+    headers = payload.get("headers", {})
+    if not isinstance(headers, dict) or not all(
+        isinstance(k, str) and isinstance(v, str)
+        for k, v in headers.items()
+    ):
+        raise RequestError("headers 必须是字符串映射")
+    if sum(
+        len(k) + len(v) for k, v in headers.items()
+    ) > MAX_HEADERS_BYTES:
+        raise RequestError("headers 过大")
+
+    return {
+        "url": url,
+        "fmt": fmt,
+        "output": output,
+        "jobs": _int_field(payload, "jobs", default_jobs, 1, 64),
+        "retries": _int_field(payload, "retries", 3, 0, 10),
+        "timeout": _int_field(payload, "timeout", 30, 1, 600),
+        "overwrite": overwrite,
+        "headers": headers,
+    }
+
+
+def make_handler(manager, token):
+    """创建绑定到指定 TaskManager 与 token 的请求处理器。"""
+    valid_states = {
+        "queued", "running", "succeeded",
+        "failed", "cancelled", "interrupted",
+    }
+
+    class ApiHandler(BaseHTTPRequestHandler):
+        server_version = "m3u8-cli"
+
+        def _cors(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type",
+            )
+            self.send_header(
+                "Access-Control-Allow-Methods",
+                "GET, POST, DELETE, OPTIONS",
+            )
+
+        def _send_json(self, status, payload):
+            body = json.dumps(
+                payload, ensure_ascii=False
+            ).encode("utf-8")
+            self.send_response(status)
+            self.send_header(
+                "Content-Type", "application/json; charset=utf-8"
+            )
+            self.send_header("Content-Length", str(len(body)))
+            self._cors()
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _authorized(self):
+            header = self.headers.get("Authorization", "")
+            scheme, _, value = header.partition(" ")
+            if scheme.lower() != "bearer":
+                return False
+            try:
+                return hmac.compare_digest(
+                    value.strip(), token
+                )
+            except TypeError:
+                return False
+
+        def _require_auth(self):
+            if not self._authorized():
+                self._send_json(401, {"error": "未授权"})
+                return False
+            return True
+
+        def _path_parts(self):
+            return urlsplit(self.path).path.rstrip("/").split("/")
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_GET(self):
+            if not self._require_auth():
+                return
+            try:
+                self._handle_get()
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+
+        def _handle_get(self):
+            parts = self._path_parts()
+
+            if parts == ["", "api", "tasks"]:
+                query = parse_qs(urlsplit(self.path).query)
+                state = query.get("state", [None])[0]
+                if state is not None and state not in valid_states:
+                    self._send_json(400, {"error": "无效的 state"})
+                    return
+                try:
+                    limit = int(query.get("limit", ["50"])[0])
+                    offset = int(query.get("offset", ["0"])[0])
+                except ValueError:
+                    self._send_json(
+                        400, {"error": "limit/offset 必须是整数"}
+                    )
+                    return
+                if limit < 1 or limit > 500 or offset < 0:
+                    self._send_json(
+                        400, {"error": "limit/offset 越界"}
+                    )
+                    return
+
+                tasks, total = manager.list(state, limit, offset)
+                self._send_json(
+                    200, {"tasks": tasks, "total": total}
+                )
+                return
+
+            if len(parts) == 4 and parts[:3] == ["", "api", "tasks"]:
+                try:
+                    task = manager.get(parts[3])
+                except TaskNotFound:
+                    self._send_json(404, {"error": "任务不存在"})
+                    return
+                self._send_json(200, {"task": task})
+                return
+
+            self._send_json(404, {"error": "未找到路径"})
+
+        def do_POST(self):
+            if not self._require_auth():
+                return
+            try:
+                self._handle_post()
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+
+        def _handle_post(self):
+            if self._path_parts() != ["", "api", "tasks"]:
+                self._send_json(404, {"error": "未找到路径"})
+                return
+
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                self._send_json(
+                    400, {"error": "无效的 Content-Length"}
+                )
+                return
+            if length <= 0:
+                self._send_json(400, {"error": "请求体不能为空"})
+                return
+            if length > MAX_BODY:
+                self._send_json(413, {"error": "请求体过大"})
+                return
+
+            raw = self.rfile.read(length)
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                self._send_json(
+                    400, {"error": "请求体不是有效 JSON"}
+                )
+                return
+
+            try:
+                params = parse_task_request(
+                    payload, manager.default_jobs
+                )
+                task = manager.submit(**params)
+            except RequestError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except TaskConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+
+            self._send_json(202, {"task": task})
+
+        def do_DELETE(self):
+            if not self._require_auth():
+                return
+            try:
+                parts = self._path_parts()
+                if len(parts) != 4 or parts[:3] != ["", "api", "tasks"]:
+                    self._send_json(404, {"error": "未找到路径"})
+                    return
+                try:
+                    task = manager.cancel(parts[3])
+                except TaskNotFound:
+                    self._send_json(404, {"error": "任务不存在"})
+                    return
+                except TaskConflict as exc:
+                    self._send_json(409, {"error": str(exc)})
+                    return
+                self._send_json(200, {"task": task})
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+
+        def log_message(self, format, *args):
+            print(f"[serve] {self.address_string()} {format % args}")
+
+    return ApiHandler
+
+
+def run_serve(args):
+    """启动 HTTP 服务，直到 Ctrl+C。"""
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    if output_dir.exists() and not output_dir.is_dir():
+        raise HLSException(f"输出路径不是目录：{output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    token = args.token or secrets.token_urlsafe(24)
+    state_file = (
+        Path(args.state_file).expanduser()
+        if args.state_file
+        else output_dir / ".m3u8-serve-state.json"
+    )
+    manager = TaskManager(
+        output_dir,
+        max_tasks=args.max_tasks,
+        default_jobs=args.jobs,
+        state_file=state_file,
+    )
+    server = ThreadingHTTPServer(
+        (args.host, args.port), make_handler(manager, token)
+    )
+    server.daemon_threads = True
+
+    print(
+        f"监听地址：http://{args.host}:{server.server_address[1]}"
+    )
+    print(f"输出目录：{output_dir}")
+    print(f"API token：{token}")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        manager.close()
