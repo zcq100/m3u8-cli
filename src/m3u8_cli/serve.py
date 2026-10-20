@@ -457,6 +457,8 @@ def parse_task_request(payload, default_jobs=8):
 
 def make_handler(manager, token):
     """创建绑定到指定 TaskManager 与 token 的请求处理器。"""
+    if not token:
+        raise ValueError("token 不能为空")
     valid_states = {
         "queued", "running", "succeeded",
         "failed", "cancelled", "interrupted",

@@ -222,6 +222,10 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 409)
 
+    def test_empty_token_rejected(self):
+        with self.assertRaises(ValueError):
+            make_handler(self.manager, "")
+
 
 class ApiCancelTests(unittest.TestCase):
     def setUp(self):

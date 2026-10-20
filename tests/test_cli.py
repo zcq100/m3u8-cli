@@ -130,7 +130,7 @@ class ServeParserTests(unittest.TestCase):
         self.assertEqual(args.jobs, 8)
         self.assertIsNone(args.state_file)
 
-    def test_serve_rejects_invalid_limits(self):
+    def test_serve_rejects_port_above_range(self):
         with mock.patch("sys.argv", ["m3u8-cli", "serve", "--port", "65536"]), \
                 contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as ctx:

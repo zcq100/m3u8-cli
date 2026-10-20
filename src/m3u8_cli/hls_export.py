@@ -8,7 +8,7 @@ from pathlib import Path
 from .errors import HLSException
 
 SEGMENT_RE = re.compile(r"\d{6}\.(?:ts|m4s)")
-KEY_RE = re.compile(r"key(?:_\d{3})?\.bin")
+KEY_RE = re.compile(r"key(?:_\d+)?\.bin")
 
 
 def segment_suffix(playlist):

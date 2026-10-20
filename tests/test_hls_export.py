@@ -196,6 +196,27 @@ class ExportTests(unittest.TestCase):
                 (output / "notes.txt").read_text("utf-8"), "keep"
             )
 
+    def test_overwrite_removes_long_key_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            output = root / "out"
+            cache.mkdir()
+            output.mkdir()
+            (cache / "segment_000000.bin").write_bytes(b"a")
+            (output / "key_1000.bin").write_bytes(b"old")
+
+            export_hls(
+                media_playlist(durations=(4.0,)),
+                cache,
+                output,
+                {},
+                {},
+                True,
+            )
+
+            self.assertFalse((output / "key_1000.bin").exists())
+
     def test_existing_generated_target_blocks_without_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
