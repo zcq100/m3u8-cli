@@ -22,3 +22,4 @@ key.bin
 *.hls-cache/
 **/cache/
 output.segments/
+.m3u8-serve-state.json

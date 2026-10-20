@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 这是一个 HLS 视频下载与格式转换工具：
 
-- `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。CLI 通过 argparse 子命令提供 `download`（下载 HLS）与 `convert`（转换本地视频）。下载流程并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装，所有下载产物写入以输出文件名派生的任务子目录。
+- `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。CLI 通过 argparse 子命令提供 `download`（下载 HLS）、`convert`（转换本地视频）与 `serve`（REST 下载服务）。下载流程并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装，所有下载产物写入以输出文件名派生的任务子目录。
 - `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
 
 运行环境依赖 `ffmpeg`（需在 PATH 中）和 `uv`。Python 版本固定为 3.12（见 `.python-version`）。
@@ -29,6 +29,12 @@ uv run m3u8-cli download "<url>" --referer "<referer>" --cookie "<cookie>"
 uv run m3u8-cli convert movie.mp4 -o out
 uv run m3u8-cli convert movie.mp4 -f mkv -c hevc -o out
 
+# 保留 HLS（不合并）
+uv run m3u8-cli download "<m3u8_url>" -f hls -o movie
+
+# 启动 REST API
+uv run m3u8-cli serve --host 0.0.0.0 --port 8787 --output-dir ./downloads
+
 # 单元测试
 uv run python -m unittest discover -s tests -v
 
@@ -42,7 +48,10 @@ uv build
 
 ### 模块划分
 
-- `cli.py`：argparse 子命令（`download` / `convert`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `cli.py`：argparse 子命令（`download` / `convert` / `serve`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()` / `run_serve()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `download.py`：可复用的 `DownloadOptions` 与 `download_hls()`，mp4/hls 两条输出路径、进度回调与协作式取消。
+- `hls_export.py`：生成扁平本地 HLS 目录（playlist、分片、fMP4 init、密钥），`--overwrite` 只清理生成条目。
+- `serve.py`：TaskManager（FIFO、并发上限、取消、JSON 持久化）与标准库 HTTP API。
 - `convert.py`：格式白名单、编码映射、输出路径派生、覆盖检查与 FFmpeg 调用。
 - `playlist.py`：播放列表获取与解析。递归解析 master playlist 并选择 `BANDWIDTH` 最高的变体（最多 5 层），解析 `EXT-X-KEY` / `EXT-X-MAP`，返回分片列表和播放列表原文的 SHA-256 指纹。
 - `downloader.py`：`Downloader` 负责单个 URL 的获取、重试、密钥缓存和 AES-128 解密。每个线程持有自己的 `requests.Session`（`threading.local`）；密钥按 URL 全局缓存并加锁。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
@@ -57,7 +66,14 @@ uv build
 3. **解密** — 仅支持 `METHOD=AES-128` 且 `KEYFORMAT=identity`。未提供 `IV` 标签时，按 HLS 规范用分片媒体序列号（16 字节大端）作为 IV。
 4. **合并与封装** — `merge.combine_segments()` 在本地拼接，`merge.mux()` 调用 FFmpeg 无损封装。
 
-合并顺序以播放列表中的分片索引为准，不能用 `as_completed()` 的完成顺序。
+合并顺序以播放列表中的分片索引为准，不能用 `as_completed()` 的完成顺序。`-f hls` 时跳过合并与 FFmpeg，分片按原始字节导出，AES-128 密钥本地化。
+
+### 服务流程
+
+1. `POST /api/tasks` 校验 token 与参数，任务进入 FIFO 队列。
+2. `TaskManager` 按 `--max-tasks` 启动工作线程，复用 `download_hls()`。
+3. `GET /api/tasks` / `GET /api/tasks/{id}` 查询状态与进度；`DELETE` 触发协作式取消。
+4. 状态写入 `<output-dir>/.m3u8-serve-state.json`，请求头只保留在内存。
 
 ### 转换流程
 
@@ -96,4 +112,8 @@ uv build
 - 播放列表只抓取一次，不刷新直播/事件播放列表的滑动窗口。
 - `convert` 只接受本地文件；不探测源编码；HLS 转换在 `--overwrite` 时会先删除旧产物，没有整体原子性。
 - `--encrypt` 仅用于 HLS；密钥与播放列表同目录分发，FFmpeg muxer 使用固定 IV=0，本地播放/探测需 `-allowed_extensions ALL`。AES-128 加密不是 DRM：能访问 `key.bin` 的客户端即可解密。
+- serve 不做 SSRF 内网地址屏蔽，依赖 token 与局域网部署。
+- serve 不提供下载产物接口，文件留在服务器。
+- serve 重启后任务标记为 `interrupted`，不会自动恢复。
+- 请求头不落盘，重启后无法重放任务。
 - 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`key.bin`、`.key_info.txt`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。

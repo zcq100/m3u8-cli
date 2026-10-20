@@ -136,6 +136,7 @@ HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重�
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `url` | 必填 | m3u8 播放列表地址 |
+| `-f, --format` | `mp4` | `mp4`（合并封装）或 `hls`（保留分片，不合并） |
 | `-o, --output` | `output.mp4` | 最终文件名；产物保存在以此文件 stem 命名的任务目录中 |
 | `-j, --jobs` | `8` | 并发下载线程数 |
 | `--retries` | `3` | 单个分片下载失败后的重试次数 |
@@ -144,6 +145,52 @@ HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重�
 | `--cookie` | 无 | 自定义 `Cookie` 请求头 |
 | `--user-agent` | `Mozilla/5.0` | 自定义 `User-Agent` 请求头 |
 | `--overwrite` | 关闭 | 覆盖已存在的最终文件 |
+
+### 保留 HLS（不合并）
+
+```bash
+# 输出 movie/playlist.m3u8 与 movie/000000.ts 等分片
+m3u8-cli download "<m3u8_url>" -f hls -o movie
+```
+
+- `-f hls` 不调用 FFmpeg；分片保持服务器返回的原始字节。
+- 普通 TS 流输出 `playlist.m3u8` 与 6 位编号的 `.ts` 分片；fMP4 流输出 `init.mp4` 与 `.m4s` 分片。
+- 源流为 AES-128 加密时保持密文，同时把密钥下载为 `key.bin`（多个不同密钥时为 `key_000.bin`、`key_001.bin`），播放列表的 `EXT-X-KEY` URI 重写为本地文件。
+- 分片、`playlist.m3u8` 与密钥文件位于同一目录；`--overwrite` 只清理本工具生成的条目。
+
+### 启动下载服务
+
+```bash
+m3u8-cli serve --host 0.0.0.0 --port 8787 --output-dir ./downloads
+```
+
+启动日志会打印监听地址、输出目录与自动生成的 `API token`。
+
+```bash
+# 创建任务
+curl -X POST http://127.0.0.1:8787/api/tasks \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/playlist.m3u8",
+    "format": "hls",
+    "output": "movie",
+    "headers": {"Referer": "https://example.com/"}
+  }'
+
+# 任务列表 / 详情
+curl http://127.0.0.1:8787/api/tasks -H "Authorization: Bearer <token>"
+curl http://127.0.0.1:8787/api/tasks/<id> -H "Authorization: Bearer <token>"
+
+# 取消任务
+curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
+  -H "Authorization: Bearer <token>"
+```
+
+- 全局最多 `--max-tasks` 个任务同时运行，其余 FIFO 排队；每个任务内部由 `jobs` 控制分片并发。
+- 请求头通过 `headers` 对象传入，用于播放列表、分片与密钥请求，不会被持久化或返回。
+- 状态文件默认 `<output-dir>/.m3u8-serve-state.json`；重启后未完成任务标记为 `interrupted`。
+- 任务列表支持 `?state=running`、`?limit=50&offset=0`；`total` 为过滤后的数量。
 
 ## 下载输出结构
 
@@ -182,6 +229,10 @@ movie/
 - HLS AES-128 加密不是 DRM；能访问 `key.bin` 的客户端即可解密。
 - FFmpeg 的 HLS muxer 会写入固定 `IV=0`，所有分片共用同一密钥与 IV。
 - 不支持自定义密钥、密钥 URI 或 IV。
+- serve 不做 SSRF 内网地址屏蔽，依赖 token 与局域网部署。
+- serve 不提供下载产物接口，文件留在服务器。
+- serve 重启后任务标记为 `interrupted`，不会自动恢复。
+- 请求头不落盘，重启后无法重放任务。
 
 ## 开发
 

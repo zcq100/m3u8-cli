@@ -11,6 +11,7 @@ import requests
 from .convert import convert_video
 from .download import DownloadOptions, download_hls
 from .errors import HLSException
+from .serve import run_serve
 
 
 def build_parser():
@@ -74,6 +75,32 @@ def build_parser():
     convert.add_argument(
         "--encrypt", action="store_true",
         help="为 HLS 分片启用 AES-128 加密",
+    )
+
+    serve = subparsers.add_parser(
+        "serve",
+        help="启动 RESTful 下载服务",
+        description="在局域网启动 HTTP API，接受远程下载任务",
+    )
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=8787)
+    serve.add_argument(
+        "--token", help="Bearer token；省略时自动生成并打印",
+    )
+    serve.add_argument(
+        "--output-dir", default=".",
+        help="任务目录根路径（默认当前目录）",
+    )
+    serve.add_argument(
+        "--max-tasks", type=int, default=3,
+        help="同时运行的任务数上限",
+    )
+    serve.add_argument(
+        "--jobs", type=int, default=8,
+        help="请求未指定 jobs 时的分片并发默认值",
+    )
+    serve.add_argument(
+        "--state-file", help="任务状态文件路径",
     )
     return parser
 
@@ -142,6 +169,13 @@ def main():
         if args.format == "hls" and args.segment_time < 1:
             parser.error("segment-time 必须为正整数")
         handler = run_convert
+    elif args.command == "serve":
+        # 0 表示由操作系统分配空闲端口（服务实际监听端口见启动日志）
+        if not 0 <= args.port <= 65535:
+            parser.error("port 必须在 0 到 65535 之间")
+        if args.max_tasks < 1 or args.jobs < 1:
+            parser.error("max-tasks/jobs 必须为正整数")
+        handler = run_serve
     else:
         parser.error(f"未知子命令：{args.command}")
 

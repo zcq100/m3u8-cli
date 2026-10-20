@@ -118,5 +118,40 @@ class MainValidationTests(unittest.TestCase):
         self.assertTrue(convert.call_args.args[6])
 
 
+class ServeParserTests(unittest.TestCase):
+    def test_serve_defaults(self):
+        args = build_parser().parse_args(["serve"])
+        self.assertEqual(args.command, "serve")
+        self.assertEqual(args.host, "0.0.0.0")
+        self.assertEqual(args.port, 8787)
+        self.assertIsNone(args.token)
+        self.assertEqual(args.output_dir, ".")
+        self.assertEqual(args.max_tasks, 3)
+        self.assertEqual(args.jobs, 8)
+        self.assertIsNone(args.state_file)
+
+    def test_serve_rejects_invalid_limits(self):
+        with mock.patch("sys.argv", ["m3u8-cli", "serve", "--port", "65536"]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                main()
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_serve_rejects_negative_port(self):
+        with mock.patch("sys.argv", ["m3u8-cli", "serve", "--port", "-1"]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                main()
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_serve_allows_ephemeral_port(self):
+        with mock.patch("m3u8_cli.cli.run_serve") as serve, \
+                mock.patch(
+                    "sys.argv", ["m3u8-cli", "serve", "--port", "0"]
+                ):
+            main()
+        self.assertEqual(serve.call_args.args[0].port, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
