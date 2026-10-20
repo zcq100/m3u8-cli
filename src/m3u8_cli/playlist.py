@@ -1,6 +1,7 @@
 """m3u8 播放列表获取与解析。"""
 
 import hashlib
+import math
 import re
 from urllib.parse import urljoin
 
@@ -84,6 +85,8 @@ def load_playlist(url, headers, timeout, depth=0):
                 )
             except ValueError as exc:
                 raise HLSException("无效的 EXTINF") from exc
+            if not math.isfinite(pending_duration):
+                raise HLSException("无效的 EXTINF")
 
         elif line.startswith("#EXT-X-KEY:"):
             attrs = parse_attrs(line)

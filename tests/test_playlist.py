@@ -1,6 +1,7 @@
 import unittest
 from unittest import mock
 
+from m3u8_cli.errors import HLSException
 from m3u8_cli.playlist import load_playlist
 
 PLAYLIST = """#EXTM3U
@@ -48,6 +49,9 @@ class PlaylistTests(unittest.TestCase):
             segments[0]["key"]["uri"],
             "https://example.com/key.bin",
         )
+        self.assertEqual(segments[0]["key"]["iv"],
+                         "0x0123456789abcdef0123456789abcdef")
+        self.assertEqual(playlist["maps"], [])
 
     def test_master_playlist_selection_keeps_durations(self):
         master = """#EXTM3U
@@ -76,6 +80,36 @@ s.ts
             playlist["segments"][0]["url"],
             "https://example.com/s.ts",
         )
+
+    def test_malformed_extinf_rejected(self):
+        text = """#EXTM3U
+#EXTINF:abc,
+s.ts
+#EXT-X-ENDLIST
+"""
+        with mock.patch(
+            "m3u8_cli.playlist.requests.get",
+            return_value=FakeResponse(text),
+        ):
+            with self.assertRaisesRegex(
+                HLSException, "无效的 EXTINF"
+            ):
+                load_playlist("https://example.com/a.m3u8", {}, 30)
+
+    def test_non_finite_extinf_rejected(self):
+        text = """#EXTM3U
+#EXTINF:nan,
+s.ts
+#EXT-X-ENDLIST
+"""
+        with mock.patch(
+            "m3u8_cli.playlist.requests.get",
+            return_value=FakeResponse(text),
+        ):
+            with self.assertRaisesRegex(
+                HLSException, "无效的 EXTINF"
+            ):
+                load_playlist("https://example.com/a.m3u8", {}, 30)
 
 
 if __name__ == "__main__":
