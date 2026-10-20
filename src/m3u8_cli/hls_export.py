@@ -67,16 +67,62 @@ def _clear_output(output_dir):
             entry.unlink()
 
 
+def _targets(playlist, key_names):
+    """返回本次导出会写入的所有目标路径。"""
+    suffix = segment_suffix(playlist)
+    targets = [f"{i:06d}{suffix}"
+               for i in range(len(playlist["segments"]))]
+    if playlist["maps"]:
+        targets.append("init.mp4")
+    targets.append("playlist.m3u8")
+    targets.extend(key_names.values())
+    return targets
+
+
+def _check_targets(playlist, output_dir, key_names, overwrite):
+    if output_dir.exists() and not output_dir.is_dir():
+        raise HLSException(f"输出路径不是目录：{output_dir}")
+    if len(playlist["maps"]) > 1:
+        raise HLSException("不支持多个初始化片段")
+
+    for name in _targets(playlist, key_names):
+        target = output_dir / name
+        if target.is_dir():
+            raise HLSException(f"目标路径是目录：{target}")
+        if not overwrite and target.exists():
+            raise HLSException(
+                f"目标已存在：{target}，使用 --overwrite 覆盖"
+            )
+
+
+def _check_sources(playlist, cache):
+    for i in range(len(playlist["segments"])):
+        source = cache / f"segment_{i:06d}.bin"
+        if not source.is_file():
+            raise HLSException(
+                f"缓存分片缺失：{source}；请删除 cache 目录后重试"
+            )
+    if playlist["maps"]:
+        source = cache / "map_0000.bin"
+        if not source.is_file():
+            raise HLSException(
+                f"缓存初始化片段缺失：{source}；请删除 cache 目录后重试"
+            )
+
+
 def export_hls(playlist, cache, output_dir, key_data, key_names,
                overwrite):
     """把缓存分片、初始化片段与密钥导出到本地 HLS 目录。"""
-    playlist_path = output_dir / "playlist.m3u8"
-    if not overwrite and playlist_path.exists():
-        raise HLSException(
-            f"输出文件已存在：{playlist_path}，使用 --overwrite 覆盖"
-        )
+    _check_targets(playlist, output_dir, key_names, overwrite)
+    _check_sources(playlist, cache)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HLSException(
+            f"无法创建输出目录：{output_dir}（{exc}）"
+        ) from exc
+
     if overwrite:
         _clear_output(output_dir)
 
@@ -91,9 +137,15 @@ def export_hls(playlist, cache, output_dir, key_data, key_names,
         )
 
     for uri, name in key_names.items():
+        if uri not in key_data:
+            raise HLSException(f"缺少密钥数据：{uri}")
         (output_dir / name).write_bytes(key_data[uri])
 
     part = output_dir / "playlist.m3u8.part"
-    part.write_text(build_playlist(playlist, key_names), "utf-8")
-    part.replace(playlist_path)
+    try:
+        part.write_text(build_playlist(playlist, key_names), "utf-8")
+        part.replace(output_dir / "playlist.m3u8")
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     return output_dir

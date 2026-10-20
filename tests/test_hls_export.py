@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from m3u8_cli.errors import HLSException
 from m3u8_cli.hls_export import build_playlist, export_hls
 
 
@@ -137,6 +138,102 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(
                 (output / "notes.txt").read_text("utf-8"), "keep"
             )
+
+    def test_fmp4_copies_init_and_m4s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            output = root / "out"
+            cache.mkdir()
+            (cache / "segment_000000.bin").write_bytes(b"media")
+            (cache / "map_0000.bin").write_bytes(b"init")
+
+            export_hls(
+                media_playlist(
+                    maps=["https://example.com/init.mp4"],
+                    durations=(4.0,),
+                ),
+                cache,
+                output,
+                {},
+                {},
+                False,
+            )
+
+            self.assertEqual(
+                (output / "init.mp4").read_bytes(), b"init"
+            )
+            self.assertEqual(
+                (output / "000000.m4s").read_bytes(), b"media"
+            )
+            text = (output / "playlist.m3u8").read_text("utf-8")
+            self.assertIn('#EXT-X-MAP:URI="init.mp4"', text)
+
+    def test_overwrite_removes_stale_segments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            output = root / "out"
+            cache.mkdir()
+            output.mkdir()
+            (cache / "segment_000000.bin").write_bytes(b"new")
+            (output / "000001.ts").write_bytes(b"old")
+            (output / "000002.ts").write_bytes(b"old")
+            (output / "notes.txt").write_text("keep")
+
+            export_hls(
+                media_playlist(durations=(4.0,)),
+                cache,
+                output,
+                {},
+                {},
+                True,
+            )
+
+            self.assertFalse((output / "000001.ts").exists())
+            self.assertFalse((output / "000002.ts").exists())
+            self.assertEqual(
+                (output / "notes.txt").read_text("utf-8"), "keep"
+            )
+
+    def test_existing_generated_target_blocks_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            output = root / "out"
+            cache.mkdir()
+            output.mkdir()
+            (cache / "segment_000000.bin").write_bytes(b"new")
+            (output / "000000.ts").write_bytes(b"old")
+
+            with self.assertRaises(HLSException):
+                export_hls(
+                    media_playlist(durations=(4.0,)),
+                    cache,
+                    output,
+                    {},
+                    {},
+                    False,
+                )
+
+    def test_missing_cache_segment_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            output = root / "out"
+            cache.mkdir()
+
+            with self.assertRaisesRegex(
+                HLSException, "缓存分片缺失"
+            ):
+                export_hls(
+                    media_playlist(durations=(4.0,)),
+                    cache,
+                    output,
+                    {},
+                    {},
+                    False,
+                )
 
 
 if __name__ == "__main__":
