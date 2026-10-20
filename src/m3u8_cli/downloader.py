@@ -76,7 +76,9 @@ class Downloader:
                 "AES 解密后的填充无效，请检查密钥、IV 和内容类型"
             ) from exc
 
-    def download(self, url, path, key_info=None, sequence=0):
+    def download(
+        self, url, path, key_info=None, sequence=0, decrypt=True
+    ):
         if path.exists() and path.stat().st_size > 0:
             return path
 
@@ -85,7 +87,8 @@ class Downloader:
         for attempt in range(self.retries + 1):
             try:
                 data = self.get_bytes(url)
-                data = self.decrypt(data, key_info, sequence)
+                if decrypt:
+                    data = self.decrypt(data, key_info, sequence)
 
                 temp = path.with_suffix(path.suffix + ".part")
                 temp.write_bytes(data)
