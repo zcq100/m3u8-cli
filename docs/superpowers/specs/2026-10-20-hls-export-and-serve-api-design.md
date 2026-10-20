@@ -96,12 +96,13 @@ movie/
   - `#EXTM3U`；
   - `#EXT-X-VERSION:3`（TS）或 `#EXT-X-VERSION:6`（fMP4）；
   - `#EXT-X-TARGETDURATION`：分片时长向上取整的最大值；
+  - `#EXT-X-PLAYLIST-TYPE:VOD`；
   - 原始 `#EXT-X-MEDIA-SEQUENCE`：无显式 IV 时播放器按序列号推导 IV，重置会破坏解密；
   - fMP4 的 `#EXT-X-MAP`；
   - 按密钥变化插入的 `#EXT-X-KEY`（含从加密切回明文的 `METHOD=NONE`）；
   - 每个分片的 `#EXTINF` 与实际时长；
   - 结尾 `#EXT-X-ENDLIST`。
-- `--overwrite` 只删除本工具生成的条目：`playlist.m3u8`、`%06d.ts`/`%06d.m4s`、`init.mp4`、`key*.bin`；目录内其他文件保留。
+- `--overwrite` 只删除本工具生成的条目：`playlist.m3u8`、`%06d.ts`/`%06d.m4s`、`init.mp4`、`key.bin` 与 `key_\d{3}.bin`；目录内其他文件保留。
 - 未指定 `--overwrite` 且 `playlist.m3u8` 已存在时报错。
 - 导出不是整体原子操作：写入失败可能留下部分新文件，与 `convert --overwrite` 的取舍一致。
 
@@ -205,12 +206,13 @@ movie/
 | `src/m3u8_cli/downloader.py` | 修改：支持不解密的原始分片下载；密钥获取可复用 |
 | `src/m3u8_cli/errors.py` | 修改：新增 `DownloadCancelled` |
 | `README.md` / `CLAUDE.md` | 更新命令、布局、API 与已知限制 |
+| `.gitignore` | 忽略 serve 状态文件 `.m3u8-serve-state.json` |
 
 依赖保持 `requests` + `pycryptodome`，不引入 Web 框架。
 
 ## 错误处理
 
-- 核心与 CLI：继续由 `main()` 统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`；取消在 CLI 下等价于用户中断，打印提示并以非零状态退出。
+- 核心与 CLI：继续由 `main()` 统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`；CLI 不提供取消入口，用户仍用 Ctrl+C 中断。`DownloadCancelled` 只由 serve 的取消流程触发，由任务线程捕获并记录。
 - serve 任务失败：记录异常文本到 `error`，状态置 `failed`；单任务失败不影响服务与其他任务。
 - serve 请求错误：按状态码返回 `{"error": ...}`；服务端异常返回 500 并记录日志。
 - 找不到 `ffmpeg`：`-f mp4` 任务失败并记录；`-f hls` 不依赖 FFmpeg。
