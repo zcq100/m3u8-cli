@@ -13,8 +13,15 @@ class DownloadParserTests(unittest.TestCase):
         )
         self.assertEqual(args.command, "download")
         self.assertEqual(args.url, "https://example.com/a.m3u8")
-        self.assertEqual(args.output, "output.mp4")
+        self.assertIsNone(args.output)
+        self.assertEqual(args.format, "mp4")
         self.assertEqual(args.jobs, 8)
+
+    def test_download_hls_format(self):
+        args = build_parser().parse_args(
+            ["download", "https://example.com/a.m3u8", "-f", "hls"]
+        )
+        self.assertEqual(args.format, "hls")
 
     def test_subcommand_required(self):
         with self.assertRaises(SystemExit):

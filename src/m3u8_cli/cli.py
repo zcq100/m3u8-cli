@@ -1,20 +1,16 @@
 """命令行入口与下载流程编排。"""
 
 import argparse
-import concurrent.futures
-import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import requests
 
 from .convert import convert_video
-from .downloader import Downloader
+from .download import DownloadOptions, download_hls
 from .errors import HLSException
-from .merge import combine_segments, mux
-from .paths import resolve_task_paths
-from .playlist import load_playlist
 
 
 def build_parser():
@@ -31,8 +27,12 @@ def build_parser():
     )
     download.add_argument("url", help="m3u8 地址")
     download.add_argument(
-        "-o", "--output", default="output.mp4",
-        help="最终文件名；产物保存在以文件 stem 命名的任务目录中",
+        "-f", "--format", choices=("mp4", "hls"), default="mp4",
+        help="输出格式：mp4（合并封装，默认）或 hls（保留分片，不合并）",
+    )
+    download.add_argument(
+        "-o", "--output",
+        help="mp4: 最终文件名；hls: 任务目录（默认 output.mp4 / output）",
     )
     download.add_argument("-j", "--jobs", type=int, default=8)
     download.add_argument("--retries", type=int, default=3)
@@ -79,15 +79,12 @@ def build_parser():
 
 
 def run_download(args):
-    if not shutil.which("ffmpeg"):
+    if args.format == "mp4" and not shutil.which("ffmpeg"):
         sys.exit("请先安装 ffmpeg")
 
-    output, cache = resolve_task_paths(args.output)
-
-    if output.exists() and not args.overwrite:
-        sys.exit(f"输出文件已存在：{output}，使用 --overwrite 覆盖")
-
-    cache.mkdir(parents=True, exist_ok=True)
+    output_arg = args.output or (
+        "output" if args.format == "hls" else "output.mp4"
+    )
 
     headers = {"User-Agent": args.user_agent}
     if args.referer:
@@ -95,84 +92,24 @@ def run_download(args):
     if args.cookie:
         headers["Cookie"] = args.cookie
 
-    print("读取 m3u8...")
-    playlist = load_playlist(args.url, headers, args.timeout)
-    segments = playlist["segments"]
-    fingerprint = playlist["fingerprint"]
+    def on_progress(completed, total):
+        print(f"\r下载进度：{completed}/{total}", end="", flush=True)
 
-    state_file = cache / "state.json"
-    previous = None
-    if state_file.exists():
-        try:
-            previous = json.loads(state_file.read_text("utf-8"))
-        except (OSError, ValueError):
-            previous = None
-
-    if previous and previous.get("fingerprint") != fingerprint:
-        print("播放列表已变化，清除旧分片缓存")
-        for p in cache.glob("segment_*.bin"):
-            p.unlink(missing_ok=True)
-        for p in cache.glob("map_*.bin"):
-            p.unlink(missing_ok=True)
-
-    state_file.write_text(
-        json.dumps({"fingerprint": fingerprint}, indent=2),
-        encoding="utf-8",
+    output = download_hls(
+        DownloadOptions(
+            url=args.url,
+            output=Path(output_arg),
+            format=args.format,
+            jobs=args.jobs,
+            retries=args.retries,
+            timeout=args.timeout,
+            headers=headers,
+            overwrite=args.overwrite,
+        ),
+        on_progress=on_progress,
     )
-
-    downloader = Downloader(headers, args.timeout, args.retries)
-
-    # 初始化片段也在合并前下载完成。
-    map_paths = {}
-    for i, map_url in enumerate(playlist["maps"]):
-        path = cache / f"map_{i:04d}.bin"
-        map_paths[map_url] = downloader.download(map_url, path)
-        print(f"初始化片段已准备：{i + 1}/{len(playlist['maps'])}")
-
-    jobs = []
-    for i, segment in enumerate(segments):
-        path = cache / f"segment_{i:06d}.bin"
-        jobs.append((i, segment, path))
-
-    print(f"共 {len(jobs)} 个分片，并发数 {args.jobs}")
-    completed = 0
-
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=args.jobs
-    ) as pool:
-        futures = {
-            pool.submit(
-                downloader.download,
-                segment["url"],
-                path,
-                segment["key"],
-                segment["sequence"],
-            ): (i, segment, path)
-            for i, segment, path in jobs
-        }
-
-        try:
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
-                completed += 1
-                print(
-                    f"\r下载进度：{completed}/{len(jobs)}",
-                    end="", flush=True,
-                )
-        except Exception:
-            for future in futures:
-                future.cancel()
-            raise
-
-    print("\n所有分片下载完成，开始本地合并")
-
-    combined = combine_segments(
-        segments, playlist["maps"], map_paths, cache
-    )
-    mux(combined, cache, output)
-
+    print()
     print(f"完成：{output}")
-    print(f"分片缓存：{cache}")
 
 
 def run_convert(args):
