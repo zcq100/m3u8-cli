@@ -24,6 +24,8 @@ class DownloaderRawTests(unittest.TestCase):
                 result = downloader.download(
                     "https://example.com/s.ts",
                     target,
+                    key_info={"uri": "https://example.com/key.bin"},
+                    sequence=3,
                     decrypt=False,
                 )
 
@@ -32,11 +34,37 @@ class DownloaderRawTests(unittest.TestCase):
 
     def test_key_length_validated(self):
         downloader = Downloader({}, 30, 0)
-        with mock.patch.object(
-            downloader, "get_bytes", return_value=b"short"
-        ):
-            with self.assertRaises(HLSException):
-                downloader.get_key("https://example.com/key.bin")
+        for data in (b"short", b"k" * 17):
+            with mock.patch.object(
+                downloader, "get_bytes", return_value=data
+            ):
+                with self.assertRaises(HLSException):
+                    downloader.get_key(
+                        "https://example.com/key.bin"
+                    )
+
+    def test_default_mode_decrypts(self):
+        downloader = Downloader({}, 30, 0)
+        key_info = {"uri": "https://example.com/key.bin"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "segment.bin"
+            with mock.patch.object(
+                downloader, "get_bytes", return_value=b"cipher"
+            ), mock.patch.object(
+                downloader,
+                "decrypt",
+                return_value=b"plain",
+            ) as decrypt:
+                downloader.download(
+                    "https://example.com/s.ts",
+                    target,
+                    key_info,
+                    7,
+                )
+
+            decrypt.assert_called_once_with(b"cipher", key_info, 7)
+            self.assertEqual(target.read_bytes(), b"plain")
 
 
 if __name__ == "__main__":
