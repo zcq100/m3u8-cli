@@ -25,14 +25,14 @@
 从远程仓库安装为全局命令：
 
 ```bash
-uv tool install git+https://git.r1a.co:5000/zcq100/m3u8_download.git
+uv tool install git+https://git.r1a.co:5000/zcq100/m3u8_cli.git
 ```
 
 也可以克隆后从本地目录安装：
 
 ```bash
-git clone https://git.r1a.co:5000/zcq100/m3u8_download.git
-cd m3u8_download
+git clone https://git.r1a.co:5000/zcq100/m3u8_cli.git m3u8-cli
+cd m3u8-cli
 uv tool install .
 ```
 
@@ -45,14 +45,14 @@ uv tool install .
 从远程仓库安装：
 
 ```bash
-pip install git+https://git.r1a.co:5000/zcq100/m3u8_download.git
+pip install git+https://git.r1a.co:5000/zcq100/m3u8_cli.git
 ```
 
 或者克隆后从本地目录安装：
 
 ```bash
-git clone https://git.r1a.co:5000/zcq100/m3u8_download.git
-cd m3u8_download
+git clone https://git.r1a.co:5000/zcq100/m3u8_cli.git m3u8-cli
+cd m3u8-cli
 pip install .
 ```
 
