@@ -23,12 +23,14 @@
     lost: "已丢失",
   };
   const ACTIVE_STATES = new Set(["queued", "running"]);
+  const TAB_NAMES = ["candidates", "tasks", "settings", "about"];
   const REFRESH_INTERVAL_MS = 2000;
   const SETTINGS_SAVE_DELAY_MS = 300;
   // 服务端会按输出目录长度截短文件名；重试名保持较短，避免时间戳被截掉。
   const RETRY_NAME_LIMIT = 100;
 
   const elements = {};
+  let activeTab = "candidates";
   let currentTabId = null;
   let currentPageUrl = "";
   let currentPageTitle = "";
@@ -44,7 +46,11 @@
   }
 
   function cacheElements() {
+    elements.tabList = byId("tab-list");
+    elements.tabs = Array.from(document.querySelectorAll(".tab"));
+    elements.panels = Array.from(document.querySelectorAll(".panel"));
     elements.candidateCount = byId("candidate-count");
+    elements.taskCount = byId("task-count");
     elements.candidateList = byId("candidate-list");
     elements.emptyState = byId("empty-state");
     elements.rescanButton = byId("rescan-button");
@@ -63,6 +69,8 @@
     elements.remoteWarning = byId("remote-warning");
     elements.testConnection = byId("test-connection");
     elements.settingsStatus = byId("settings-status");
+    elements.versionInfo = byId("version-info");
+    elements.versionText = byId("version-text");
     elements.toast = byId("toast");
   }
 
@@ -119,6 +127,56 @@
     } catch (error) {
       showToast(`复制失败：${error.message}`);
     }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 标签页切换                                                          */
+  /* ------------------------------------------------------------------ */
+
+  function activateTab(name, moveFocus) {
+    activeTab = TAB_NAMES.includes(name) ? name : TAB_NAMES[0];
+    for (const tab of elements.tabs) {
+      const selected = tab.dataset.tab === activeTab;
+      tab.classList.toggle("active", selected);
+      tab.setAttribute("aria-selected", selected ? "true" : "false");
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && moveFocus) {
+        tab.focus();
+      }
+    }
+    for (const panel of elements.panels) {
+      panel.hidden = panel.id !== `panel-${activeTab}`;
+    }
+  }
+
+  function selectTab(name, moveFocus) {
+    activateTab(name, moveFocus);
+    if (activeTab === "candidates") {
+      loadCandidates().catch(() => {});
+    } else if (activeTab === "tasks") {
+      refreshTasks().catch(() => {});
+    } else if (activeTab === "settings") {
+      refreshVersionInfo().catch(() => {});
+    }
+  }
+
+  function handleTabKeydown(event) {
+    const index = TAB_NAMES.indexOf(activeTab);
+    let next = null;
+    if (event.key === "ArrowRight") {
+      next = (index + 1) % TAB_NAMES.length;
+    } else if (event.key === "ArrowLeft") {
+      next = (index - 1 + TAB_NAMES.length) % TAB_NAMES.length;
+    } else if (event.key === "Home") {
+      next = 0;
+    } else if (event.key === "End") {
+      next = TAB_NAMES.length - 1;
+    }
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    selectTab(TAB_NAMES[next], true);
   }
 
   /* ------------------------------------------------------------------ */
@@ -279,10 +337,7 @@
     const settingsButton = createButton(
       "打开设置",
       () => {
-        const panel = document.querySelector(".settings");
-        if (panel) {
-          panel.open = true;
-        }
+        selectTab("settings");
         elements.token.focus();
       },
       "ghost small",
@@ -380,6 +435,11 @@
   }
 
   function renderTasks() {
+    const activeCount = tasks.filter(
+      (task) => ACTIVE_STATES.has(task.state),
+    ).length;
+    elements.taskCount.textContent = String(activeCount);
+    elements.taskCount.hidden = activeCount === 0;
     elements.taskEmpty.hidden = tasks.length > 0;
     elements.taskList.replaceChildren();
     for (const task of tasks) {
@@ -465,8 +525,45 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* 设置                                                                */
+  /* 设置与版本信息                                                      */
   /* ------------------------------------------------------------------ */
+
+  async function refreshVersionInfo() {
+    let extensionVersion = "?";
+    try {
+      const manifest = chrome.runtime.getManifest
+        ? chrome.runtime.getManifest()
+        : null;
+      extensionVersion = (manifest && manifest.version) || "?";
+    } catch (_) {
+      // 极少数环境拿不到 manifest，保留占位符。
+    }
+
+    let backend = "未连接";
+    let detail = "";
+    try {
+      const response = await sendMessage({ type: "server:version" });
+      if (response && response.ok) {
+        backend = response.version ? `v${response.version}` : "未知";
+        elements.versionInfo.classList.add("connected");
+      } else {
+        const status = Number((response && response.status) || 0);
+        backend = status === 404
+          ? "旧版"
+          : status === 401
+            ? "需 Token"
+            : "未连接";
+        detail = (response && response.error) || "";
+        elements.versionInfo.classList.remove("connected");
+      }
+    } catch (error) {
+      detail = error.message || String(error);
+      elements.versionInfo.classList.remove("connected");
+    }
+    elements.versionText.textContent =
+      `插件 v${extensionVersion} · 后端 ${backend}`;
+    elements.versionText.title = detail;
+  }
 
   async function loadSettings() {
     const data = await chrome.storage.local.get("settings");
@@ -561,6 +658,7 @@
     } finally {
       elements.testConnection.disabled = false;
     }
+    refreshVersionInfo().catch(() => {});
   }
 
   /* ------------------------------------------------------------------ */
@@ -568,6 +666,12 @@
   /* ------------------------------------------------------------------ */
 
   function bindEvents() {
+    for (const tab of elements.tabs) {
+      tab.addEventListener("click", () => {
+        selectTab(tab.dataset.tab);
+      });
+    }
+    elements.tabList.addEventListener("keydown", handleTabKeydown);
     elements.rescanButton.addEventListener("click", requestRescan);
     elements.clearButton.addEventListener("click", clearCurrentTab);
     elements.refreshTasks.addEventListener("click", () => {
@@ -631,6 +735,7 @@
   async function init() {
     cacheElements();
     bindEvents();
+    activateTab(activeTab);
 
     const [tab] = await chrome.tabs.query({
       active: true,
@@ -643,6 +748,7 @@
     }
 
     await Promise.all([loadSettings(), loadCandidates(), loadTasks()]);
+    refreshVersionInfo().catch(() => {});
     startTaskRefresh();
     await refreshTasks();
   }

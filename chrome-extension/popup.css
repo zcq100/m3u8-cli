@@ -97,10 +97,9 @@ button:disabled {
   top: 0;
   z-index: 2;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 14px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 0;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -133,24 +132,72 @@ h1 {
   white-space: nowrap;
 }
 
-.count {
-  min-width: 20px;
-  padding: 0 6px;
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 -14px;
+  padding: 0 14px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: -1px;
+  padding: 7px 10px 6px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tab:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent-strong);
+}
+
+.tab.active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+
+.tab-count {
+  min-width: 18px;
+  padding: 0 5px;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 16px;
   text-align: center;
 }
 
-.header-actions {
-  display: flex;
-  gap: 6px;
+.tab.active .tab-count {
+  background: var(--accent);
+  color: #fff;
 }
 
 main {
   padding: 10px 14px 16px;
+}
+
+.section-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .section + .section {
@@ -372,24 +419,11 @@ h2 {
   word-break: break-word;
 }
 
-.settings {
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-
-.settings summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .settings-grid {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  padding-top: 10px;
+  padding-top: 4px;
 }
 
 .settings-grid > label {
@@ -461,6 +495,124 @@ h2 {
 
 .status.error {
   color: var(--danger);
+}
+
+.version-info {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.version-info.connected {
+  color: var(--success);
+}
+
+.version-info a {
+  flex: none;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.version-info a:hover {
+  text-decoration: underline;
+}
+
+.about-section {
+  margin-top: 14px;
+}
+
+.section-title-row + .about-section {
+  margin-top: 8px;
+}
+
+.about-section h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.about-desc {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.about-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.about-step + .about-step {
+  margin-top: 10px;
+}
+
+.about-step h4 {
+  margin: 0 0 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.about-note {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.about-section pre {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.about-section code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.about-section a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.about-section a:hover {
+  text-decoration: underline;
+}
+
+.about-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.about-info dt {
+  color: var(--muted);
+}
+
+.about-info dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .toast {

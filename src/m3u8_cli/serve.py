@@ -1,6 +1,7 @@
 """RESTful 下载服务。"""
 
 import hmac
+import ipaddress
 import json
 import secrets
 import threading
@@ -11,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from . import __version__
 from .download import DownloadOptions, download_hls
 from .errors import DownloadCancelled, HLSException
 from .paths import fit_output_name
@@ -470,8 +472,22 @@ def parse_task_request(payload, default_jobs=8):
     }
 
 
-def make_handler(manager, token):
-    """创建绑定到指定 TaskManager 与 token 的请求处理器。"""
+def is_loopback_address(address):
+    """判断连接来源是否为本机回环地址（兼容 IPv4-mapped IPv6）。"""
+    try:
+        ip = ipaddress.ip_address(str(address).split("%", 1)[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback
+
+
+def make_handler(manager, token, allow_local=True):
+    """创建绑定到指定 TaskManager 与 token 的请求处理器。
+
+    allow_local 为 True 时，来源为回环地址的请求跳过 token 校验。
+    """
     if not token:
         raise ValueError("token 不能为空")
     valid_states = {
@@ -525,11 +541,15 @@ def make_handler(manager, token):
                 return False
 
         def _require_auth(self):
-            if not self._authorized():
-                self.close_connection = True
-                self._send_json(401, {"error": "未授权"})
-                return False
-            return True
+            if allow_local and is_loopback_address(
+                self.client_address[0]
+            ):
+                return True
+            if self._authorized():
+                return True
+            self.close_connection = True
+            self._send_json(401, {"error": "未授权"})
+            return False
 
         def _path_parts(self):
             return urlsplit(self.path).path.rstrip("/").split("/")
@@ -564,6 +584,13 @@ def make_handler(manager, token):
 
         def _handle_get(self):
             parts = self._path_parts()
+
+            if parts == ["", "api", "version"]:
+                self._send_json(200, {
+                    "name": "m3u8-cli",
+                    "version": __version__,
+                })
+                return
 
             if parts == ["", "api", "tasks"]:
                 query = parse_qs(urlsplit(self.path).query)
@@ -725,6 +752,10 @@ def run_serve(args):
     )
     print(f"输出目录：{output_dir}", flush=True)
     print(f"API token：{token}", flush=True)
+    print(
+        "本机（回环地址）请求免 token；其他来源需要 Bearer token",
+        flush=True,
+    )
 
     try:
         server.serve_forever()

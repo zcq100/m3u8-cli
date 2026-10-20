@@ -11,16 +11,76 @@
       <div class="title-row">
         <span class="logo" aria-hidden="true">▶</span>
         <h1>m3u8 检测器</h1>
-        <span id="candidate-count" class="count">0</span>
       </div>
-      <div class="header-actions">
-        <button id="rescan-button" type="button" class="ghost">重新扫描</button>
-        <button id="clear-button" type="button" class="ghost">清空</button>
-      </div>
+      <nav id="tab-list" class="tabs" role="tablist" aria-label="视图">
+        <button
+          id="tab-candidates"
+          type="button"
+          class="tab active"
+          role="tab"
+          data-tab="candidates"
+          aria-controls="panel-candidates"
+          aria-selected="true"
+        >
+          链接<span id="candidate-count" class="tab-count">0</span>
+        </button>
+        <button
+          id="tab-tasks"
+          type="button"
+          class="tab"
+          role="tab"
+          data-tab="tasks"
+          aria-controls="panel-tasks"
+          aria-selected="false"
+          tabindex="-1"
+        >
+          任务<span id="task-count" class="tab-count" hidden>0</span>
+        </button>
+        <button
+          id="tab-settings"
+          type="button"
+          class="tab"
+          role="tab"
+          data-tab="settings"
+          aria-controls="panel-settings"
+          aria-selected="false"
+          tabindex="-1"
+        >
+          设置
+        </button>
+        <button
+          id="tab-about"
+          type="button"
+          class="tab"
+          role="tab"
+          data-tab="about"
+          aria-controls="panel-about"
+          aria-selected="false"
+          tabindex="-1"
+        >
+          关于
+        </button>
+      </nav>
     </header>
 
     <main>
-      <section class="section">
+      <section
+        id="panel-candidates"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-candidates"
+      >
+        <div class="section-title-row">
+          <h2>检测到的链接</h2>
+          <div class="section-actions">
+            <button id="rescan-button" type="button" class="ghost small">
+              重新扫描
+            </button>
+            <button id="clear-button" type="button" class="ghost small">
+              清空
+            </button>
+          </div>
+        </div>
         <div id="empty-state" class="empty">
           未检测到 m3u8 链接。<br />
           播放视频或刷新页面后再试。
@@ -28,7 +88,13 @@
         <ul id="candidate-list" class="candidate-list"></ul>
       </section>
 
-      <section class="section">
+      <section
+        id="panel-tasks"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-tasks"
+        hidden
+      >
         <div class="section-title-row">
           <h2>下载任务</h2>
           <button id="refresh-tasks" type="button" class="ghost small">
@@ -39,8 +105,17 @@
         <ul id="task-list" class="task-list"></ul>
       </section>
 
-      <details class="settings">
-        <summary>设置</summary>
+      <section
+        id="panel-settings"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-settings"
+        hidden
+      >
+        <div class="section-title-row">
+          <h2>设置</h2>
+          <span class="hint">修改后自动保存</span>
+        </div>
         <div class="settings-grid">
           <label>
             <span>服务地址</span>
@@ -58,7 +133,7 @@
               type="password"
               autocomplete="off"
               spellcheck="false"
-              placeholder="m3u8-cli serve --token ..."
+              placeholder="本机 serve 可留空"
             />
           </label>
           <label>
@@ -101,7 +176,113 @@
             <span id="settings-status" class="status"></span>
           </div>
         </div>
-      </details>
+        <div id="version-info" class="version-info">
+          <span id="version-text">插件版本读取中…</span>
+          <a
+            id="version-pypi"
+            href="https://pypi.org/project/m3u8-cli/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >PyPI</a
+          >
+        </div>
+      </section>
+
+      <section
+        id="panel-about"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-about"
+        hidden
+      >
+        <div class="section-title-row">
+          <h2>关于</h2>
+          <span class="hint">m3u8-cli 链接检测器</span>
+        </div>
+
+        <div class="about-section">
+          <h3>项目描述</h3>
+          <p class="about-desc">
+            本扩展用于发现网页中的 m3u8 播放列表，并与本地
+            <code>m3u8-cli</code> 下载服务配合使用：
+          </p>
+          <ul class="about-list">
+            <li>
+              监听网络请求并扫描页面，识别 m3u8 地址，支持 iframe
+              中的播放器
+            </li>
+            <li>
+              复制链接，或生成带 <code>Referer</code>/<code>Cookie</code>
+              的 <code>m3u8-cli download</code> 命令
+            </li>
+            <li>
+              一键提交到 <code>m3u8-cli serve</code>
+              下载，并在弹窗中查看进度、取消任务
+            </li>
+          </ul>
+        </div>
+
+        <div class="about-section">
+          <h3>使用帮助</h3>
+
+          <div class="about-step">
+            <h4>1. 安装 CLI</h4>
+            <pre><code>pip install m3u8-cli</code></pre>
+          </div>
+
+          <div class="about-step">
+            <h4>2. 启动下载服务</h4>
+            <pre><code>m3u8-cli serve \
+  --host 127.0.0.1 \
+  --port 8787 \
+  --token &lt;token&gt; \
+  --output-dir ./downloads</code></pre>
+            <p class="about-note">
+              本机（回环地址）请求免 Token；其他来源需使用与
+              <code>--token</code> 一致的 Token。
+            </p>
+          </div>
+
+          <div class="about-step">
+            <h4>3. 配置扩展</h4>
+            <p class="about-note">
+              在「设置」中确认服务地址（默认
+              <code>http://127.0.0.1:8787</code>），本机可留空
+              Token。
+            </p>
+          </div>
+        </div>
+
+        <div class="about-section">
+          <h3>项目信息</h3>
+          <dl class="about-info">
+            <dt>项目主页</dt>
+            <dd>
+              <a
+                href="https://pypi.org/project/m3u8-cli/"
+                target="_blank"
+                rel="noopener noreferrer"
+                >pypi.org/project/m3u8-cli</a
+              >
+            </dd>
+            <dt>作者</dt>
+            <dd>r1a</dd>
+            <dt>邮箱</dt>
+            <dd>
+              <a href="mailto:m@zcq100.com">m@zcq100.com</a>
+            </dd>
+            <dt>许可证</dt>
+            <dd>
+              <a
+                href="https://opensource.org/license/mit"
+                target="_blank"
+                rel="noopener noreferrer"
+                >MIT License</a
+              >
+            </dd>
+          </dl>
+        </div>
+      </section>
     </main>
 
     <div id="toast" class="toast" role="status" hidden></div>

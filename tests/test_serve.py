@@ -12,6 +12,7 @@ from m3u8_cli.serve import (
     TaskConflict,
     TaskManager,
     TaskNotFound,
+    is_loopback_address,
     parse_task_request,
 )
 
@@ -36,6 +37,17 @@ def submit(manager, output, fmt="hls", overwrite=False):
         overwrite=overwrite,
         headers={},
     )
+
+
+class LoopbackAddressTests(unittest.TestCase):
+    def test_loopback_variants(self):
+        for address in (
+            "127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1",
+        ):
+            self.assertTrue(is_loopback_address(address), address)
+        for address in ("192.168.1.20", "8.8.8.8", "::ffff:8.8.8.8",
+                        "not-an-ip"):
+            self.assertFalse(is_loopback_address(address), address)
 
 
 class TaskManagerTests(unittest.TestCase):

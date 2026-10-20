@@ -418,7 +418,9 @@ async function apiFetch(path, options) {
     headers: { ...((options && options.headers) || {}) },
     signal: AbortSignal.timeout(8000),
   };
-  init.headers.Authorization = `Bearer ${settings.token}`;
+  if (settings.token) {
+    init.headers.Authorization = `Bearer ${settings.token}`;
+  }
 
   let response;
   try {
@@ -468,12 +470,6 @@ async function submitDownload(message) {
     return { ok: false, error: "无效的标签页" };
   }
   const settings = await getSettings();
-  if (!settings.token) {
-    return {
-      ok: false,
-      error: "未配置 Token：请在扩展设置中填写 serve 的 token",
-    };
-  }
   const state = await readTabState(tabId);
   const candidate = state.items.find((item) => item.id === message.candidateId);
   if (!candidate) {
@@ -523,10 +519,6 @@ async function submitDownload(message) {
 }
 
 async function testConnection() {
-  const settings = await getSettings();
-  if (!settings.token) {
-    return { ok: false, error: "请先填写 Token" };
-  }
   try {
     const result = await apiFetch("/api/tasks?limit=1");
     return { ok: true, total: Number(result.total || 0) };
@@ -722,6 +714,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return { ok: true, tasks };
     },
     "settings:test": () => testConnection(),
+    "server:version": async () => {
+      const result = await apiFetch("/api/version");
+      return { ok: true, version: String(result.version || "") };
+    },
     "cli:build": () => buildCliMessage(message),
     "tab:clear": () => clearTabAndRescan(message.tabId),
     "dom:rescan": () => rescanTab(message.tabId),

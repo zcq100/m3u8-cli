@@ -7,6 +7,7 @@ from http.server import ThreadingHTTPServer
 
 import requests
 
+from m3u8_cli import __version__
 from m3u8_cli.errors import DownloadCancelled
 from m3u8_cli.serve import TaskManager, make_handler
 
@@ -20,7 +21,67 @@ def wait_for(predicate, timeout=2.0):
     return False
 
 
+class LocalAuthTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.manager = TaskManager(
+            self.tmp.name,
+            max_tasks=1,
+            runner=lambda options, on_progress=None, cancel=None:
+                options.output,
+        )
+        self.server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(self.manager, "remote-token"),
+        )
+        self.server.daemon_threads = True
+        self.thread = threading.Thread(
+            target=self.server.serve_forever, daemon=True
+        )
+        self.thread.start()
+        self.base = (
+            f"http://127.0.0.1:{self.server.server_address[1]}"
+        )
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.manager.close()
+        self.tmp.cleanup()
+
+    def test_local_requests_skip_token(self):
+        version = requests.get(f"{self.base}/api/version")
+        self.assertEqual(version.status_code, 200)
+        self.assertEqual(version.json()["version"], __version__)
+
+        task = requests.post(
+            f"{self.base}/api/tasks",
+            json={
+                "url": "https://example.com/a.m3u8",
+                "format": "hls",
+                "output": "movie",
+            },
+        )
+        self.assertEqual(task.status_code, 202)
+
+        listing = requests.get(f"{self.base}/api/tasks")
+        self.assertEqual(listing.status_code, 200)
+
+
 class ApiTests(unittest.TestCase):
+    def test_version_endpoint(self):
+        response = requests.get(
+            f"{self.base}/api/version", headers=self.auth()
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["name"], "m3u8-cli")
+        self.assertEqual(payload["version"], __version__)
+
+    def test_version_requires_auth(self):
+        response = requests.get(f"{self.base}/api/version")
+        self.assertEqual(response.status_code, 401)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.manager = TaskManager(
@@ -33,7 +94,8 @@ class ApiTests(unittest.TestCase):
         self.token = "test-token"
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            make_handler(self.manager, self.token),
+            # 本测试类验证 token 校验，关闭回环免鉴权。
+            make_handler(self.manager, self.token, allow_local=False),
         )
         self.server.daemon_threads = True
         self.thread = threading.Thread(

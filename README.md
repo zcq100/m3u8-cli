@@ -187,6 +187,11 @@ m3u8-cli serve --host 0.0.0.0 --port 8787 --output-dir ./downloads
 
 启动日志会打印监听地址、输出目录与 API token；省略 --token 时会自动生成。
 
+来源为回环地址（`127.0.0.0/8`、`::1`，含 IPv4-mapped IPv6）的请求**免 token**，方便本机扩展/脚本直接使用；其他来源仍需 `Authorization: Bearer <token>`。注意：
+
+- 这意味着同一台机器上的其他用户或进程也能免 token 访问；如果通过监听在本机的反向代理转发请求，所有流量看起来都来自回环地址。
+- API 的 CORS 为 `*`，免 token 也意味着浏览器里的任意网页都能调用本机 serve（读取任务、提交下载）。如果在意这一点，请保留 Token（网页无法获取 Token），或自行收紧 CORS。
+
 ```bash
 # 创建任务
 curl -X POST http://127.0.0.1:8787/api/tasks \
@@ -203,6 +208,9 @@ curl -X POST http://127.0.0.1:8787/api/tasks \
 # 任务列表 / 详情
 curl http://127.0.0.1:8787/api/tasks -H "Authorization: Bearer <token>"
 curl http://127.0.0.1:8787/api/tasks/<id> -H "Authorization: Bearer <token>"
+
+# 服务版本
+curl http://127.0.0.1:8787/api/version -H "Authorization: Bearer <token>"
 
 # 取消任务
 curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
@@ -222,7 +230,8 @@ curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
 - 监听页面网络请求并结合 DOM 扫描，列出当前标签页的 m3u8 地址；
 - 采集页面标题（`og:title`、Twitter Card、JSON-LD、`document.title`）作为默认下载文件名，也可在设置中改用 URL 短 hash；
 - 复制链接，或生成带 `Referer`/`Cookie`/`User-Agent` 的 `m3u8-cli download` 命令；
-- 一键提交到本地 `m3u8-cli serve` 下载，并在弹窗中查看进度、取消任务。
+- 一键提交到本地 `m3u8-cli serve` 下载，并在弹窗中查看进度、取消任务；
+- 设置页显示扩展版本与后端 `serve` 版本（依赖 `GET /api/version`）。
 
 安装步骤：打开 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择仓库中的 `chrome-extension/` 目录。
 
@@ -303,7 +312,8 @@ movie/
 - HLS AES-128 加密不是 DRM；能访问 `key.bin` 的客户端即可解密。
 - FFmpeg 的 HLS muxer 会写入固定 `IV=0`，所有分片共用同一密钥与 IV。
 - 不支持自定义密钥、密钥 URI 或 IV。
-- serve 不做 SSRF 内网地址屏蔽，依赖 token 与局域网部署。
+- serve 不做 SSRF 内网地址屏蔽；回环地址请求免 token，非本机来源仍依赖 token 与局域网部署。
+- 回环免 token 对同一台机器上的所有用户生效；多用户主机或本机反向代理场景请谨慎，必要时只监听 `127.0.0.1`。
 - Windows 默认 `MAX_PATH=260`：serve 会按输出目录长度截短过长的文件名（保留扩展名），任务响应中返回实际名字；CLI 的 `-o` 不做改写。
 - serve 不提供下载产物接口，文件留在服务器。
 - serve 重启后任务标记为 `interrupted`，不会自动恢复。

@@ -48,7 +48,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 | 设置项 | 说明 |
 | --- | --- |
 | 服务地址 | 默认 `http://127.0.0.1:8787`，需与 `--host/--port` 一致 |
-| Token | 与 `--token` 一致；点击“测试连接”确认 |
+| Token | 与 `--token` 一致；本机 serve（回环地址）可留空，点击“测试连接”确认 |
 | 下载格式 | `mp4`（合并封装）或 `hls`（保留分片） |
 | 文件名 | `页面标题`（默认）或 `URL 短 hash`（12 位十六进制；URL 带临时 token 时每次可能不同） |
 | 覆盖已存在的文件 | 对应 serve 的 `overwrite` 字段 |
@@ -60,7 +60,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 
 1. 打开包含视频的页面并开始播放，或等待页面加载完成。
 2. 扩展图标上的 badge 显示当前标签页识别到的 m3u8 数量。
-3. 点击扩展图标，候选条目会显示页面标题和 m3u8 URL：
+3. 点击扩展图标，弹窗分为「链接 / 任务 / 设置 / 关于」四个标签页；「关于」页分为「项目描述 / 使用帮助 / 项目信息」：使用帮助包含 `pip install m3u8-cli`、可折行展示的 serve 启动命令与扩展配置提示，项目信息包含 PyPI 主页、作者/邮箱与 MIT 许可证链接；「链接」中候选条目会显示页面标题和 m3u8 URL：
    - **复制**：复制 m3u8 URL。
    - **复制 CLI**：生成 `m3u8-cli download ...` 命令，按设置决定是否包含 `--referer`、`--cookie`、`--user-agent`；`-o` 默认使用页面标题。
    - **下载**：提交到本地 serve 服务，默认文件名同样来自页面标题；若提示文件名冲突，可点击“换名重试”自动加时间戳。
@@ -101,6 +101,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 - 服务地址不是本机（`127.0.0.1`/`localhost`/`::1`）且开启 Cookie 透传时，设置区会显示警告。
 - Token 保存在 `storage.local`，请勿在不信任的共享 Chrome 配置中使用。
 - serve 端请求头只保留在内存，不落盘、不在任务响应中返回；详见仓库 README。
+- serve 对回环地址请求免 token：Token 留空时扩展默认只适合连接本机 serve；同一台机器上的其他用户/进程也能免 token 访问该服务。API 的 CORS 为 `*`，因此任意网页也能调用本机 serve；若在意请在扩展里保留 Token（网页拿不到它）。
 - 扩展不会自动提交下载，必须由用户点击，避免页面借扩展触发 serve 请求。
 - 「跳过 TLS 证书校验」会关闭 serve 到源站的证书与主机名校验，可能暴露下载内容给中间人；仅在确认源站可信（如自签名内网服务）时开启。
 - CORS `*` 不是安全边界，真正的访问控制是 Bearer token。
@@ -113,7 +114,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 | 提示“未配置 Token” | 在扩展设置中填写 serve 的 `--token` |
 | “无法连接 http://...（Failed to fetch）” | serve 未启动、地址/端口错误，或协议不是 `http/https` |
 | 提示“连接 ... 超时（8 秒）” | 服务可达性差或进程卡住；确认 serve 正常运行并检查网络/防火墙 |
-| 401 / “未授权” | Token 与服务端不一致；serve 未指定 `--token` 时每次启动都会生成新 token |
+| 401 / “未授权” | 非本机请求需要 Token；本机回环请求免 token，若仍 401 检查是否经过代理或填了错误 Token |
 | 409 / 目标文件已存在 | 点击“换名重试”，或在设置中开启“覆盖已存在的文件” |
 | 下载失败，提示 403 | 源站可能校验 `Referer`/`Cookie`/`User-Agent`；确认候选来自“网络”且页面仍处于登录状态 |
 | 失败原因是 `CERTIFICATE_VERIFY_FAILED` / Hostname mismatch | 源站证书不匹配（自签名或内网域名）；确认可信后开启「跳过 TLS 证书校验」 |
@@ -153,7 +154,7 @@ uv run python scripts/build_extension.py
 - `storage.session["hdr:<candidateId>"]`：`{cookie, referer, userAgent}`，仅 background 读取。
 - `storage.local["settings"]`：服务地址、token、格式、`naming`（`title`/`hash`）、`insecure`（跳过源站 TLS 校验）等设置。
 - `storage.local["tasks"]`：最近的任务摘要（最多 20 条，优先保留活动任务），不含请求头。
-- popup 通过 `chrome.runtime.sendMessage` 发送 `download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`cli:build`、`tab:clear`、`dom:rescan`。
+- popup 通过 `chrome.runtime.sendMessage` 发送 `download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`server:version`、`cli:build`、`tab:clear`、`dom:rescan`。`server:version` 请求后端的 `GET /api/version`；设置页底部显示「插件 vX · 后端 vY」，并附 PyPI 链接；无法连接/需要 Token/旧版 serve（无该接口）分别显示对应状态。
 - content script 通过 `dom:candidates` 上报 URL 与 `title`（附 `frameTop` 标记是否顶层 frame），用 `sender.tab.id` 归属标签页。
 
 ## 已知限制

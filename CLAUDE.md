@@ -62,7 +62,7 @@ uv build && uv run python scripts/build_extension.py
 - `cli.py`：argparse 子命令（`download` / `convert` / `serve`）、顶层 `-v/--version`（读取包内 `__version__`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()` / `run_serve()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
 - `download.py`：可复用的 `DownloadOptions` 与 `download_hls()`，mp4/hls 两条输出路径、进度回调与协作式取消；成功后用 ffprobe 生成元数据文件（`<产物>.meta.json` / `<任务目录>/meta.json`：顶层为 ffprobe 的 `format`/`streams`（去掉 `filename`），另加 `source` 来源信息，不含 `output` 与请求头；ffprobe 缺失或失败时打印警告并只写 `source`），mp4 合并/hls 导出成功后删除系统临时目录中的分片缓存（失败时保留以便续传）。
 - `hls_export.py`：生成扁平本地 HLS 目录（playlist、分片、fMP4 init、密钥），`--overwrite` 只清理生成条目。
-- `serve.py`：TaskManager（FIFO、并发上限、取消、JSON 持久化）与标准库 HTTP API；任务请求的 `insecure`（布尔，默认 false）传给 `DownloadOptions.verify = not insecure`。
+- `serve.py`：TaskManager（FIFO、并发上限、取消、JSON 持久化）与标准库 HTTP API（`/api/tasks`、`/api/version`）；回环来源（`is_loopback_address()`，含 IPv4-mapped IPv6）默认跳过 token 校验（`make_handler(..., allow_local=False)` 仅供测试关闭）；任务请求的 `insecure`（布尔，默认 false）传给 `DownloadOptions.verify = not insecure`。
 - `convert.py`：格式白名单、编码映射、输出路径派生、覆盖检查与 FFmpeg 调用。
 - `playlist.py`：播放列表获取与解析。递归解析 master playlist 并选择 `BANDWIDTH` 最高的变体（最多 5 层），解析 `EXT-X-KEY` / `EXT-X-MAP`，返回分片列表和播放列表原文的 SHA-256 指纹。
 - `downloader.py`：`Downloader` 负责单个 URL 的获取、重试、密钥缓存和 AES-128 解密。每个线程持有自己的 `requests.Session`（`threading.local`），`verify` 参数直接映射到 `Session.verify`（`--insecure`/API `insecure` 时为 False）；密钥按 URL 全局缓存并加锁。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
@@ -99,9 +99,9 @@ uv build && uv run python scripts/build_extension.py
 存储与消息协议（改动时同步更新 `chrome-extension/README.md` 与根 README）：
 
 - `storage.session["tab:<tabId>"]`：`{pageUrl, pageTitle, items:[{..., pageTitle}]}` 候选列表（每 tab 最多 30 条），输出名优先用标题、缺失时回退 URL 派生名；`storage.session["hdr:<candidateId>"]`：敏感请求头，仅 background 读取。
-- `storage.local["settings"]`：服务地址、token、格式、`naming`（`title` 页面标题 / `hash` URL 短 hash）、overwrite、sendCookie、copyCookie。
+- `storage.local["settings"]`：服务地址、token（本机 serve 可留空）、格式、`naming`（`title` 页面标题 / `hash` URL 短 hash）、overwrite、sendCookie、copyCookie。
 - `storage.local["tasks"]`：任务摘要（最多 20 条，优先保留活动任务），不含请求头。
-- 消息：`dom:candidates`（content→background）、`download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`cli:build`、`tab:clear`、`dom:rescan`（popup→background）。
+- 消息：`dom:candidates`（content→background）、`download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`server:version`、`cli:build`、`tab:clear`、`dom:rescan`（popup→background）。`server:version` 调用 `GET /api/version`，设置页据此显示「插件 vX · 后端 vY」。
 - 下载必须由用户点击触发；仅透传白名单请求头，Cookie 只在 `storage.session`，不渲染、不落盘。非 loopback 服务地址且开启 Cookie 透传时 UI 显示警告。
 - `apiFetch()` 统一加 Bearer token 与 8 秒超时；任务轮询由 popup 每 2 秒触发，popup 关闭后由 `chrome.alarms` 以 30 秒（旧版 1 分钟）周期继续。
 
@@ -156,6 +156,7 @@ movie/
 - `convert` 只接受本地文件；不探测源编码；HLS 转换在 `--overwrite` 时会先删除旧产物，没有整体原子性。
 - `--encrypt` 仅用于 HLS；密钥与播放列表同目录分发，FFmpeg muxer 使用固定 IV=0，本地播放/探测需 `-allowed_extensions ALL`。AES-128 加密不是 DRM：能访问 `key.bin` 的客户端即可解密。
 - serve 不做 SSRF 内网地址屏蔽，依赖 token 与局域网部署。
+- 回环地址请求免 token（对同一台机器的所有用户生效）；多用户主机或本机反向代理场景需自行评估，必要时只监听 `127.0.0.1`。由于 CORS 为 `*`，免 token 时任意网页也能调用本机 API。
 - serve 不提供下载产物接口，文件留在服务器。
 - Windows 下 serve 会按 `MAX_PATH` 把过长的 `output` 文件名截短（保留扩展名），任务响应返回实际使用的名字；CLI 的 `-o` 不做改写，超长路径需用户自行处理，扩展可切换到「URL 短 hash」命名规避。
 - mp4 与 hls 的分片缓存都位于系统临时目录：成功后删除，失败/取消保留以便续传；操作系统清理临时目录后需要重新下载。
