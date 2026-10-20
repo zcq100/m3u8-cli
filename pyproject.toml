@@ -6,6 +6,8 @@ readme = "README.md"
 authors = [
     { name = "r1a", email = "m@zcq100.com" }
 ]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pycryptodome>=4.0.1",

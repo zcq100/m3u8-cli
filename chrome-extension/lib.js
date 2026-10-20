@@ -8,6 +8,7 @@
   const HLS_CONTENT_TYPE =
     /(?:application|audio)\/(?:vnd\.apple\.|x-)?mpegurl/i;
   const OUTPUT_LIMIT = 200;
+  const TITLE_LIMIT = 300;
   const RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
   function looksLikePlaylistUrl(raw) {
@@ -55,6 +56,19 @@
       .join("");
   }
 
+  /** 页面标题的轻量清洗：去掉控制字符、合并空白、限制长度。 */
+  function cleanPageTitle(raw) {
+    if (typeof raw !== "string") {
+      return "";
+    }
+    const title = stripControlCharacters(raw.normalize("NFC"))
+      .replace(/\s+/g, " ")
+      .trim();
+    return title.length > TITLE_LIMIT
+      ? title.slice(0, TITLE_LIMIT).trim()
+      : title;
+  }
+
   function sanitizeOutputName(raw, format) {
     const hls = format === "hls";
     const limit = hls ? OUTPUT_LIMIT : OUTPUT_LIMIT - ".mp4".length;
@@ -99,7 +113,54 @@
     return sanitizeOutputName(combined, format === "hls" ? "hls" : "mp4");
   }
 
-  function addTimestampSuffix(name, format, stamp) {
+  /** 标题可用时用标题做输出名，否则回退到 URL 派生名。 */
+  function outputNameFromTitle(rawTitle, rawUrl, format) {
+    const title = cleanPageTitle(rawTitle);
+    if (title) {
+      return sanitizeOutputName(title, format);
+    }
+    return deriveOutputName(rawUrl, format);
+  }
+
+  /** 53 位字符串哈希（cyrb53），扩展里需要同步、确定性的短 hash。 */
+  function cyrb53(text) {
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  }
+
+  /** URL 的 12 位十六进制短 hash，用作纯 hash 文件名。 */
+  function urlShortHash(rawUrl) {
+    return cyrb53(String(rawUrl || ""))
+      .toString(16)
+      .padStart(13, "0")
+      .slice(-12);
+  }
+
+  /** 按命名策略生成输出名：title（页面标题，默认）或 hash（URL 短 hash）。 */
+  function buildOutputName(opts) {
+    const options = opts || {};
+    const format = options.format === "hls" ? "hls" : "mp4";
+    if (options.naming === "hash") {
+      return sanitizeOutputName(urlShortHash(options.url), format);
+    }
+    return outputNameFromTitle(options.title, options.url, format);
+  }
+
+  /**
+   * 追加时间戳换名。limit 为结果长度上限；长标题会被服务端按路径长度截短，
+   * 因此重试时应传入较小上限，确保时间戳落在保留的前缀里。
+   */
+  function addTimestampSuffix(name, format, stamp, limit) {
     const hls = format === "hls";
     let base = String(name || "");
     if (!hls && /\.mp4$/i.test(base)) {
@@ -107,6 +168,12 @@
     }
     const now = stamp || new Date().toISOString();
     const suffix = String(now).replace(/[-:TZ.]/g, "").slice(0, 14);
+    const cap = Number.isInteger(limit) && limit > 0 ? limit : OUTPUT_LIMIT;
+    const room = Math.max(
+      1,
+      cap - suffix.length - 1 - (hls ? 0 : ".mp4".length),
+    );
+    base = base.slice(0, room);
     return sanitizeOutputName(base + "-" + suffix, hls ? "hls" : "mp4");
   }
 
@@ -148,8 +215,12 @@
     looksLikePlaylistUrl,
     isHlsContentType,
     normalizeCandidateUrl,
+    cleanPageTitle,
     sanitizeOutputName,
     deriveOutputName,
+    outputNameFromTitle,
+    urlShortHash,
+    buildOutputName,
     addTimestampSuffix,
     shellQuote,
     buildCliCommand,

@@ -22,10 +22,13 @@ def combine_segments(segments, maps, map_paths, cache):
     return combined
 
 
-def mux(combined, cache, output):
+def mux(combined, output):
     """把合并文件无损封装为最终 MP4，成功后原子替换。"""
-    # 临时文件与最终文件同属一个任务目录，重命名保持原子性。
-    temp_output = cache / (output.stem + ".partial" + output.suffix)
+    # 缓存可能在系统临时目录（甚至另一个文件系统），临时文件必须与最终
+    # 文件同目录，才能用 rename 原子替换。
+    temp_output = output.parent / (
+        output.stem + ".partial" + output.suffix
+    )
     command = [
         "ffmpeg", "-hide_banner", "-y",
         "-i", str(combined),

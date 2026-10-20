@@ -59,15 +59,15 @@ uv build && uv run python scripts/build_extension.py
 
 ### 模块划分
 
-- `cli.py`：argparse 子命令（`download` / `convert` / `serve`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()` / `run_serve()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
-- `download.py`：可复用的 `DownloadOptions` 与 `download_hls()`，mp4/hls 两条输出路径、进度回调与协作式取消。
+- `cli.py`：argparse 子命令（`download` / `convert` / `serve`）、顶层 `-v/--version`（读取包内 `__version__`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()` / `run_serve()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
+- `download.py`：可复用的 `DownloadOptions` 与 `download_hls()`，mp4/hls 两条输出路径、进度回调与协作式取消；成功后写元数据文件（`<产物>.meta.json` / `<任务目录>/meta.json`，不含请求头），mp4 合并成功后删除系统临时目录中的分片缓存（失败时保留以便续传）。
 - `hls_export.py`：生成扁平本地 HLS 目录（playlist、分片、fMP4 init、密钥），`--overwrite` 只清理生成条目。
 - `serve.py`：TaskManager（FIFO、并发上限、取消、JSON 持久化）与标准库 HTTP API。
 - `convert.py`：格式白名单、编码映射、输出路径派生、覆盖检查与 FFmpeg 调用。
 - `playlist.py`：播放列表获取与解析。递归解析 master playlist 并选择 `BANDWIDTH` 最高的变体（最多 5 层），解析 `EXT-X-KEY` / `EXT-X-MAP`，返回分片列表和播放列表原文的 SHA-256 指纹。
 - `downloader.py`：`Downloader` 负责单个 URL 的获取、重试、密钥缓存和 AES-128 解密。每个线程持有自己的 `requests.Session`（`threading.local`）；密钥按 URL 全局缓存并加锁。已存在且非空的缓存文件会被直接复用，实现断点续传；写入时先写 `.part` 再原子替换。
-- `paths.py`：把 `-o` 派生为 `(final, cache_dir)`，并校验任务目录。
-- `merge.py`：`combine_segments()` 按播放列表顺序拼接本地分片（fMP4 先写初始化片段）；`mux()` 对本地 `combined.*` 运行一次 FFmpeg（`-map 0 -c copy -movflags +faststart`），先输出到 `cache/*.partial.mp4`，成功后原子替换为最终文件。
+- `paths.py`：hls 的 `-o` 派生 `(final, cache_dir)` 并校验任务目录；mp4 用 `resolve_mp4_paths()` 保持最终路径、把缓存放到 `tempfile.gettempdir()/m3u8-cli-<uid>/<最终路径哈希>`（同一 `-o` 可续传）；`fit_output_name()` 按平台截短文件名（Windows 按 `MAX_PATH` 预算，同时检查 mp4 最终文件/同目录 `.partial`、hls 的 `<stem>/cache/segment_*.bin` 与系统临时缓存；POSIX 按 255 字节组件上限）。
+- `merge.py`：`combine_segments()` 按播放列表顺序拼接本地分片（fMP4 先写初始化片段）；`mux()` 对本地 `combined.*` 运行一次 FFmpeg（`-map 0 -c copy -movflags +faststart`），先输出到最终文件同目录的 `<stem>.partial<后缀>`，成功后原子替换（缓存可能位于另一个文件系统，不能把临时文件放在缓存目录再 rename）。
 - `errors.py`：共享的 `HLSException`。
 
 ### 处理流程
@@ -91,15 +91,15 @@ uv build && uv run python scripts/build_extension.py
 `chrome-extension/` 是无构建的 MV3 扩展（Chrome 116+），文件职责：
 
 - `manifest.json`：权限仅 `webRequest`、`storage`、`alarms` 与 `<all_urls>` host permission；content script 注入所有 http/https 页面并开启 `all_frames`。
-- `lib.js`：三端共享纯函数（URL/MIME 判断、输出名清洗、shell 转义、CLI 命令），经典脚本 + UMD 导出；`lib.test.js` 用 Node 内置 test runner 测试。
-- `background.js`：顶层注册 `webRequest` 观察器。`onSendHeaders`（`extraHeaders`）按 `requestId` 缓存 `Cookie/Referer/User-Agent`，`onHeadersReceived` 在请求为 GET/HEAD、状态 2xx 且 URL 以 `.m3u8/.m3u` 结尾或 Content-Type 为 HLS MIME 时创建候选；`onCompleted/onErrorOccurred` 清理缓存。不拦截请求，也不 hook 页面 fetch/XHR。
-- `content.js`：扫描 `video/audio/source`、m3u8 链接与内联脚本文本，MutationObserver 去抖后只上报新增 URL。
+- `lib.js`：三端共享纯函数（URL/MIME 判断、页面标题清洗、输出名清洗与派生、shell 转义、CLI 命令），经典脚本 + UMD 导出；`lib.test.js` 用 Node 内置 test runner 测试。
+- `background.js`：顶层注册 `webRequest` 观察器。`onSendHeaders`（`extraHeaders`）按 `requestId` 缓存 `Cookie/Referer/User-Agent`，`onHeadersReceived` 在请求为 GET/HEAD、状态 2xx 且 URL 以 `.m3u8/.m3u` 结尾或 Content-Type 为 HLS MIME 时创建候选，并通过 `chrome.tabs.get()` 补标签页标题；`onCompleted/onErrorOccurred` 清理缓存。不拦截请求，也不 hook 页面 fetch/XHR。
+- `content.js`：扫描 `video/audio/source`、m3u8 链接与内联脚本文本，MutationObserver 去抖后只上报新增 URL；同时按 `og:title` → `twitter:title` → 视频 JSON-LD → `document.title` 采集标题并随消息上报。
 - `popup.*`：候选列表、复制/复制 CLI/下载、任务进度与设置。popup 不直接调用 serve API。
 
 存储与消息协议（改动时同步更新 `chrome-extension/README.md` 与根 README）：
 
-- `storage.session["tab:<tabId>"]`：候选列表（每 tab 最多 30 条）；`storage.session["hdr:<candidateId>"]`：敏感请求头，仅 background 读取。
-- `storage.local["settings"]`：服务地址、token、格式、overwrite、sendCookie、copyCookie。
+- `storage.session["tab:<tabId>"]`：`{pageUrl, pageTitle, items:[{..., pageTitle}]}` 候选列表（每 tab 最多 30 条），输出名优先用标题、缺失时回退 URL 派生名；`storage.session["hdr:<candidateId>"]`：敏感请求头，仅 background 读取。
+- `storage.local["settings"]`：服务地址、token、格式、`naming`（`title` 页面标题 / `hash` URL 短 hash）、overwrite、sendCookie、copyCookie。
 - `storage.local["tasks"]`：任务摘要（最多 20 条，优先保留活动任务），不含请求头。
 - 消息：`dom:candidates`（content→background）、`download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`cli:build`、`tab:clear`、`dom:rescan`（popup→background）。
 - 下载必须由用户点击触发；仅透传白名单请求头，Cookie 只在 `storage.session`，不渲染、不落盘。非 loopback 服务地址且开启 Cookie 透传时 UI 显示警告。
@@ -109,22 +109,27 @@ uv build && uv run python scripts/build_extension.py
 
 `convert.py` 先派生输出目录并检查覆盖，然后执行一次 FFmpeg 调用：HLS 写入 `playlist.m3u8` 与 `ts/%06d.ts`（播放列表通过 `-hls_base_url ts/` 引用分片）；`--encrypt` 时额外生成 16 字节 `key.bin`，并通过临时 `.key_info.txt` 交给 `-hls_key_info_file` 做 AES-128 加密，转换结束删除临时文件（转换失败时同时删除新写入的 `key.bin`）；单文件先写 `.partial.*`，成功后原子替换。`--overwrite` 的 HLS 清理发生在转换前，只删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件（`--encrypt` 时 `key.bin` 随后被新密钥覆盖；转换失败时新密钥也会被删除），失败可能丢失旧产物；`ts/` 不允许是符号链接，未指定 `--overwrite` 时悬空的目标符号链接也视为已存在，指定时原子替换链接本身而不跟随目标；陈旧的 `.partial.*` 会在调用 FFmpeg 前删除。单文件输出为 `<输出目录>/<输入文件 stem>.<扩展名>`；未指定 `-o` 时输出目录为当前目录下的输入文件 stem。
 
-### 任务目录
+### 下载输出布局
 
-路径由 `paths.resolve_task_paths()` 统一派生：`-o output_2.mp4` 生成任务目录 `output_2/`，最终文件为 `output_2/output_2.mp4`，中间产物在 `output_2/cache/`。若输出路径本身已经是 `<dir>/<dir>.mp4` 形式，则复用该目录，避免重复嵌套。
-
-任务目录布局是持久化契约，改动时必须同时更新下载、失效清理和合并三处：
+**hls（`-f hls`）**：`-o movie` 直接作为输出任务目录；中间分片缓存位于 `movie/cache/`，成功后保留（可继续续传或手动清理），同时写入 `movie/meta.json`。
 
 ```
-<task>/
-  <name>.mp4          # 最终产物
+movie/
+  playlist.m3u8       # 本地可播放的播放列表
+  000000.ts           # 导出的分片（fMP4 为 .m4s，另有 init.mp4）
+  key.bin             # 启用密钥时
+  meta.json           # 来源 URL、格式、分片数、时长、指纹与时间
   cache/
     state.json        # {"fingerprint": ...}；播放列表变化时清理旧分片
     segment_%06d.bin  # 已解密的媒体分片，按播放列表索引编号
     map_%04d.bin      # fMP4 初始化片段
-    combined.ts|mp4   # 合并后的中间文件
-    <name>.partial.mp4
+    combined.ts|mp4   # 合并后的中间文件（仅 mp4 流程使用）
 ```
+
+**mp4（默认）**：最终文件就是 `-o` 指定的路径（`movie.mp4`），分片缓存不落在输出目录，而是
+`<系统临时目录>/m3u8-cli-<uid>/<最终路径 SHA-256 前 16 位>/`；合并成功后整个缓存目录被删除，失败/取消时保留，便于用相同 `-o` 续传。元数据写入 `<最终文件>.meta.json`（例如 `movie.mp4.meta.json`）。FFmpeg 的临时输出为最终文件同目录的 `<stem>.partial<后缀>`，保证跨文件系统时仍能原子替换。
+
+任务目录与缓存布局是持久化契约，改动时必须同时更新下载、失效清理、合并与扩展 README。
 
 ### 参考实现
 
@@ -148,6 +153,9 @@ uv build && uv run python scripts/build_extension.py
 - `--encrypt` 仅用于 HLS；密钥与播放列表同目录分发，FFmpeg muxer 使用固定 IV=0，本地播放/探测需 `-allowed_extensions ALL`。AES-128 加密不是 DRM：能访问 `key.bin` 的客户端即可解密。
 - serve 不做 SSRF 内网地址屏蔽，依赖 token 与局域网部署。
 - serve 不提供下载产物接口，文件留在服务器。
+- Windows 下 serve 会按 `MAX_PATH` 把过长的 `output` 文件名截短（保留扩展名），任务响应返回实际使用的名字；CLI 的 `-o` 不做改写，超长路径需用户自行处理，扩展可切换到「URL 短 hash」命名规避。
+- mp4 缓存位于系统临时目录：成功后删除，失败/取消保留以便续传；操作系统清理临时目录后需要重新下载。
+- 元数据文件记录完整来源 URL（可能含临时 token）与产物信息，不含请求头/Cookie。
 - serve 重启后任务标记为 `interrupted`，不会自动恢复。
 - 请求头不落盘，重启后无法重放任务。
 - Chrome 扩展只做网络观察与 DOM 扫描，不 hook 页面 fetch/XHR；缓存命中或没有实际请求的地址可能只由 DOM 扫描发现。

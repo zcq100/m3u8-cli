@@ -22,13 +22,19 @@
 
 ### 使用 uv（推荐）
 
-从远程仓库安装为全局命令：
+从 PyPI 安装为全局命令：
 
 ```bash
-uv tool install git+<仓库地址>
+uv tool install m3u8-cli
 ```
 
-也可以克隆后从本地目录安装：
+升级：
+
+```bash
+uv tool upgrade m3u8-cli
+```
+
+也可以克隆后从本地源码安装：
 
 ```bash
 git clone <仓库地址>
@@ -42,13 +48,19 @@ uv tool install .
 
 ### 使用 pip
 
-从远程仓库安装：
+从 PyPI 安装：
 
 ```bash
-pip install git+<仓库地址>
+pip install m3u8-cli
 ```
 
-或者克隆后从本地目录安装：
+升级：
+
+```bash
+pip install --upgrade m3u8-cli
+```
+
+也可以克隆后从本地源码安装：
 
 ```bash
 git clone <仓库地址>
@@ -56,7 +68,7 @@ cd m3u8-cli
 pip install .
 ```
 
-升级时加 `--upgrade`：`pip install --upgrade .`。若系统的 Python 启用了 externally-managed 保护（如 Arch、Debian 的默认配置），请先创建并激活虚拟环境再执行上述命令。
+若系统的 Python 启用了 externally-managed 保护（如 Arch、Debian 的默认配置），请先创建并激活虚拟环境再执行上述命令。
 
 ## 使用
 
@@ -76,10 +88,16 @@ python -m m3u8_cli download "<m3u8_url>"
 python -m m3u8_cli convert movie.mp4 -o out
 ```
 
+查看版本：
+
+```bash
+m3u8-cli -v       # 或 --version
+```
+
 ### 常用示例
 
 ```bash
-# 默认输出到 output/output.mp4
+# 默认输出到当前目录的 output.mp4
 m3u8-cli download "https://example.com/playlist.m3u8"
 
 # 指定输出文件名与并发数
@@ -198,6 +216,7 @@ curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
 `chrome-extension/` 提供一个 Manifest V3 扩展，用于识别页面中的 m3u8 链接：
 
 - 监听页面网络请求并结合 DOM 扫描，列出当前标签页的 m3u8 地址；
+- 采集页面标题（`og:title`、Twitter Card、JSON-LD、`document.title`）作为默认下载文件名，也可在设置中改用 URL 短 hash；
 - 复制链接，或生成带 `Referer`/`Cookie`/`User-Agent` 的 `m3u8-cli download` 命令；
 - 一键提交到本地 `m3u8-cli serve` 下载，并在弹窗中查看进度、取消任务。
 
@@ -209,7 +228,7 @@ curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
 m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir ./downloads
 ```
 
-权限、Cookie 处理与排障说明见 [`chrome-extension/README.md`](chrome-extension/README.md)。
+权限、Cookie 处理与排障说明见源码仓库中的 `chrome-extension/README.md`。
 
 发布或分发时，可生成只包含运行时文件的扩展 zip：
 
@@ -220,28 +239,52 @@ uv run python scripts/build_extension.py
 
 ## 下载输出结构
 
-以 `-o movie.mp4` 为例：
+### MP4（默认，合并封装）
+
+以 `-o movie.mp4` 为例，输出目录下只有最终产物和元数据：
+
+```
+movie.mp4
+movie.mp4.meta.json     # 来源 URL、格式、分片数、时长、指纹与时间
+movie.partial.mp4       # FFmpeg 临时输出（仅在合并过程中存在）
+```
+
+分片缓存不落在输出目录，而是位于系统临时目录：
+
+```
+<TMP>/m3u8-cli-<uid>/<最终路径哈希>/
+├── state.json          # 播放列表指纹，用于缓存失效判断
+├── segment_000000.bin  # 已解密的媒体分片
+├── map_0000.bin        # fMP4 初始化片段（仅 fMP4 流）
+└── combined.ts|mp4     # 本地合并的中间文件
+```
+
+- 合并成功后整个缓存目录会被删除；失败或取消时保留，便于续传。
+- 同一 `-o` 对应同一个缓存目录；播放列表变化时 `state.json` 指纹会触发旧分片清理。
+- 元数据文件不包含 `Referer`/`Cookie`/`User-Agent`，但会记录完整来源 URL（可能含临时 token）。
+
+### HLS（保留分片）
+
+以 `-o movie` 为例：
 
 ```
 movie/
-├── movie.mp4              # 最终产物
-└── cache/
-    ├── state.json         # 播放列表指纹，用于缓存失效判断
-    ├── segment_000000.bin # 已解密的媒体分片
-    ├── map_0000.bin       # fMP4 初始化片段（仅 fMP4 流）
-    ├── combined.ts|mp4    # 本地合并的中间文件
-    └── movie.partial.mp4  # FFmpeg 临时输出
+├── playlist.m3u8       # 本地播放列表
+├── 000000.ts           # 分片（fMP4 为 .m4s，另有 init.mp4）
+├── key.bin             # 存在 AES-128 密钥时
+├── meta.json           # 来源与产物元数据
+└── cache/              # 下载中间产物，成功后保留
+    ├── state.json
+    ├── segment_000000.bin
+    └── combined.ts|mp4
 ```
-
-- 任务目录由输出文件名自动派生；若输出路径已经是 `movie/movie.mp4` 形式，会复用该目录，不会重复嵌套。
-- 最终文件生成成功后，缓存仍会保留在任务目录中。
 
 ## 缓存与续传
 
-- 使用相同 `-o` 且任务目录仍在时，已存在且非空的分片会被直接复用。
-- `cache/state.json` 记录播放列表原文的 SHA-256 指纹；播放列表变化时会清除旧分片。
+- 使用相同 `-o` 且缓存仍在时，已存在且非空的分片会被直接复用。
+- `state.json` 记录播放列表原文的 SHA-256 指纹；播放列表变化时会清除旧分片。
 - 下载时最终文件已存在且未指定 `--overwrite`，程序会直接退出。
-- 需要彻底清理时，删除整个任务目录即可。
+- HLS 的缓存保留在任务目录中；MP4 的缓存在系统临时目录，操作系统清理临时目录后需要重新下载。需要彻底清理时删除对应的缓存/任务目录即可。
 
 ## 已知限制
 
@@ -256,6 +299,7 @@ movie/
 - FFmpeg 的 HLS muxer 会写入固定 `IV=0`，所有分片共用同一密钥与 IV。
 - 不支持自定义密钥、密钥 URI 或 IV。
 - serve 不做 SSRF 内网地址屏蔽，依赖 token 与局域网部署。
+- Windows 默认 `MAX_PATH=260`：serve 会按输出目录长度截短过长的文件名（保留扩展名），任务响应中返回实际名字；CLI 的 `-o` 不做改写。
 - serve 不提供下载产物接口，文件留在服务器。
 - serve 重启后任务标记为 `interrupted`，不会自动恢复。
 - 请求头不落盘，重启后无法重放任务。
@@ -308,6 +352,10 @@ src/m3u8_cli/
 `chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、加载时无需构建），细节见其 README；`scripts/build_extension.py` 负责生成可分发的扩展 zip。
 
 `reference/hls_downloader.py` 是早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护。
+
+## 许可证
+
+本项目采用 [MIT](https://opensource.org/licenses/MIT) 许可证，详见仓库根目录的 `LICENSE` 文件。
 
 ## 免责声明
 

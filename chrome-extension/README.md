@@ -4,6 +4,7 @@
 
 - 无构建步骤：原生 JavaScript，Chrome 直接加载目录即可。
 - 网络请求 + DOM 扫描双来源识别，支持 iframe 中的播放器。
+- 自动采集页面标题（`og:title`、Twitter Card、JSON-LD、`document.title`）作为默认下载文件名，标题缺失时回退到「host-文件名」；也可在设置中改为 URL 短 hash（12 位十六进制）。
 - 一键下载时自动携带该 m3u8 请求自己的 `Referer`、`Cookie`、`User-Agent`。
 - 弹窗内查看任务进度、取消任务；popup 关闭后仍由后台轮询。
 
@@ -49,6 +50,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 | 服务地址 | 默认 `http://127.0.0.1:8787`，需与 `--host/--port` 一致 |
 | Token | 与 `--token` 一致；点击“测试连接”确认 |
 | 下载格式 | `mp4`（合并封装）或 `hls`（保留分片） |
+| 文件名 | `页面标题`（默认）或 `URL 短 hash`（12 位十六进制；URL 带临时 token 时每次可能不同） |
 | 覆盖已存在的文件 | 对应 serve 的 `overwrite` 字段 |
 | 发送捕获到的 Cookie | 默认开启，仅发送给上面配置的服务地址 |
 | 复制 CLI 命令时包含 Cookie | 默认关闭；开启后命令会包含 Cookie 原文，注意 shell 历史 |
@@ -57,10 +59,10 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 
 1. 打开包含视频的页面并开始播放，或等待页面加载完成。
 2. 扩展图标上的 badge 显示当前标签页识别到的 m3u8 数量。
-3. 点击扩展图标：
+3. 点击扩展图标，候选条目会显示页面标题和 m3u8 URL：
    - **复制**：复制 m3u8 URL。
-   - **复制 CLI**：生成 `m3u8-cli download ...` 命令，按设置决定是否包含 `--referer`、`--cookie`、`--user-agent`。
-   - **下载**：提交到本地 serve 服务；若提示文件名冲突，可点击“换名重试”自动加时间戳。
+   - **复制 CLI**：生成 `m3u8-cli download ...` 命令，按设置决定是否包含 `--referer`、`--cookie`、`--user-agent`；`-o` 默认使用页面标题。
+   - **下载**：提交到本地 serve 服务，默认文件名同样来自页面标题；若提示文件名冲突，可点击“换名重试”自动加时间戳。
 4. “下载任务”区域显示排队中/下载中/已完成/失败/已取消/已中断等状态和分片进度；运行中的任务可以取消。
 5. “重新扫描”会请求当前页面的所有 frame 重新执行 DOM 扫描；“清空”只会清除本标签页的识别结果。
 
@@ -70,6 +72,13 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 - **页面**：content script 扫描 `video`/`audio`/`source`、m3u8 链接和脚本文本中的地址。
 
 同一 URL 同时来自两个来源时会合并为一条，并优先保留网络请求捕获的请求头。
+
+标题采集：
+
+- content script 按 `og:title` → `twitter:title` → 视频类 JSON-LD → `document.title` 的顺序取标题；iframe 中的候选优先使用顶层标签页标题。
+- 网络请求捕获的候选通过 `chrome.tabs.get()` 取标签页标题（`<all_urls>` host permission 已覆盖，无需 `tabs` 权限）。
+- 标题会清洗控制字符、合并空白，输出名再经过非法字符替换和 200 字符截断；拿不到标题时回退到「host-文件名」。
+- 选择「URL 短 hash」时直接对 m3u8 URL 做 12 位哈希，不依赖页面标题，适合标题过长或不想在文件名中暴露标题的场景。
 
 ## 权限说明
 
@@ -99,8 +108,10 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 | 现象 | 处理 |
 | --- | --- |
 | 弹窗提示“未检测到 m3u8” | 确认视频已开始播放；刚安装/重载扩展后刷新页面；尝试“重新扫描” |
-| “测试连接”报 `Failed to fetch` | 确认 serve 已启动、地址与端口正确、协议为 `http/https` |
-| 401 / “未授权” | 检查 Token；serve 未指定 `--token` 时每次启动都会生成新 token |
+| 提示“未配置 Token” | 在扩展设置中填写 serve 的 `--token` |
+| “无法连接 http://...（Failed to fetch）” | serve 未启动、地址/端口错误，或协议不是 `http/https` |
+| 提示“连接 ... 超时（8 秒）” | 服务可达性差或进程卡住；确认 serve 正常运行并检查网络/防火墙 |
+| 401 / “未授权” | Token 与服务端不一致；serve 未指定 `--token` 时每次启动都会生成新 token |
 | 409 / 目标文件已存在 | 点击“换名重试”，或在设置中开启“覆盖已存在的文件” |
 | 下载失败，提示 403 | 源站可能校验 `Referer`/`Cookie`/`User-Agent`；确认候选来自“网络”且页面仍处于登录状态 |
 | 扩展重载后页面无反应 | 刷新页面，让 content script 重新注入 |
@@ -127,7 +138,7 @@ uv run python scripts/build_extension.py
 | 文件 | 职责 |
 | --- | --- |
 | `manifest.json` | MV3 配置、权限、content script 注入 |
-| `lib.js` | 三端共享的纯函数：URL 判断、MIME 判断、输出名清洗、shell 转义、CLI 命令 |
+| `lib.js` | 三端共享的纯函数：URL 判断、MIME 判断、页面标题清洗、输出名清洗与派生、shell 转义、CLI 命令 |
 | `lib.test.js` | `lib.js` 的单元测试 |
 | `background.js` | 网络检测、候选与会话存储、badge、serve API 调用、任务轮询、消息路由 |
 | `content.js` | DOM 扫描、MutationObserver、增量上报 |
@@ -135,18 +146,20 @@ uv run python scripts/build_extension.py
 
 ### 数据与消息
 
-- `storage.session["tab:<tabId>"]`：`{pageUrl, items:[{id,url,source,hasCookie,...}]}`，最多 30 条，标签页关闭或导航时清理。
+- `storage.session["tab:<tabId>"]`：`{pageUrl, pageTitle, items:[{id,url,source,pageTitle,hasCookie,...}]}`，最多 30 条，标签页关闭或导航时清理。
 - `storage.session["hdr:<candidateId>"]`：`{cookie, referer, userAgent}`，仅 background 读取。
-- `storage.local["settings"]`：服务地址、token、格式等设置。
+- `storage.local["settings"]`：服务地址、token、格式、`naming`（`title`/`hash`）等设置。
 - `storage.local["tasks"]`：最近的任务摘要（最多 20 条，优先保留活动任务），不含请求头。
 - popup 通过 `chrome.runtime.sendMessage` 发送 `download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`cli:build`、`tab:clear`、`dom:rescan`。
-- content script 通过 `dom:candidates` 上报 URL，用 `sender.tab.id` 归属标签页。
+- content script 通过 `dom:candidates` 上报 URL 与 `title`（附 `frameTop` 标记是否顶层 frame），用 `sender.tab.id` 归属标签页。
 
 ## 已知限制
 
 - popup 关闭后任务轮询依赖 `chrome.alarms`，最短周期为 30 秒（旧版 Chrome 为 1 分钟）；popup 打开时每 2 秒刷新一次。
 - 只做网络请求与 DOM 扫描，不注入 MAIN world 去 hook `fetch`/`XMLHttpRequest`；缓存命中或没有实际请求的地址可能只由 DOM 扫描发现。
 - 不支持 Shadow DOM 内的元素；iframe 支持依赖 `all_frames` 和网络层。
+- 标题依赖页面元数据：SPA 或动态改写的标题可能滞后，拿不到时回退到 URL 派生名；标题超过 200 字符会被截断，标签页标题可能带站点后缀（如「- 示例站」），需要时可手动改名。
+- serve 还会按输出目录长度进一步截短文件名（Windows `MAX_PATH` 或 POSIX 255 字节限制），任务响应里的 `output` 是实际使用的名字；「换名重试」会使用较短的名字，避免时间戳被截掉。
 - SPA 路由切换不会自动清空候选，使用“清空”或刷新页面。
 - 每个标签页最多保留 30 条候选，任务历史最多 20 条。
 - 下载能力受 `m3u8-cli` 本身限制（AES-128 identity、无 DRM、不支持 BYTERANGE 等），详见根 README。

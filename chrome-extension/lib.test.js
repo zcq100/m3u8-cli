@@ -77,6 +77,35 @@ test("deriveOutputName 使用 hostname 避免 index 重名", () => {
   );
 });
 
+test("cleanPageTitle 合并空白、去掉控制字符并限制长度", () => {
+  assert.equal(lib.cleanPageTitle("  示例  视频 \n"), "示例 视频");
+  assert.equal(lib.cleanPageTitle("a\u0000b\u001fc c"), "abc c");
+  assert.equal(lib.cleanPageTitle("a\tb\nc"), "abc");
+  assert.equal(lib.cleanPageTitle(""), "");
+  assert.equal(lib.cleanPageTitle(null), "");
+  assert.equal(lib.cleanPageTitle(42), "");
+  assert.equal(lib.cleanPageTitle("长".repeat(400)).length, 300);
+});
+
+test("outputNameFromTitle 优先标题，缺失时回退 URL 派生名", () => {
+  assert.equal(
+    lib.outputNameFromTitle(
+      "示例 视频/第1集",
+      "https://cdn.test/a/index.m3u8",
+      "mp4",
+    ),
+    "示例 视频_第1集.mp4",
+  );
+  assert.equal(
+    lib.outputNameFromTitle("Movie", "https://cdn.test/a/index.m3u8", "hls"),
+    "Movie",
+  );
+  assert.equal(
+    lib.outputNameFromTitle("   ", "https://cdn.test/a/index.m3u8", "hls"),
+    "cdn.test-index",
+  );
+});
+
 test("addTimestampSuffix 生成确定性的新文件名", () => {
   assert.equal(
     lib.addTimestampSuffix("movie.mp4", "mp4", "2026-10-20T14:30:00.000Z"),
@@ -86,6 +115,51 @@ test("addTimestampSuffix 生成确定性的新文件名", () => {
     lib.addTimestampSuffix("movie", "hls", "2026-10-20T14:30:00.000Z"),
     "movie-20261020143000",
   );
+});
+
+test("urlShortHash 生成稳定的 12 位十六进制短 hash", () => {
+  const first = lib.urlShortHash("https://a.test/a.m3u8");
+  assert.match(first, /^[0-9a-f]{12}$/);
+  assert.equal(first, lib.urlShortHash("https://a.test/a.m3u8"));
+  assert.notEqual(first, lib.urlShortHash("https://a.test/b.m3u8"));
+});
+
+test("buildOutputName 支持 title 与 hash 两种命名策略", () => {
+  assert.equal(
+    lib.buildOutputName({
+      title: "示例 视频",
+      url: "https://a.test/a.m3u8",
+      format: "mp4",
+      naming: "title",
+    }),
+    "示例 视频.mp4",
+  );
+
+  const hashed = lib.buildOutputName({
+    url: "https://a.test/a.m3u8",
+    format: "mp4",
+    naming: "hash",
+  });
+  assert.match(hashed, /^[0-9a-f]{12}\.mp4$/);
+  assert.equal(
+    lib.buildOutputName({
+      url: "https://a.test/a.m3u8",
+      format: "hls",
+      naming: "hash",
+    }),
+    hashed.slice(0, -".mp4".length),
+  );
+});
+
+test("addTimestampSuffix 限制长度时保留时间戳", () => {
+  const result = lib.addTimestampSuffix(
+    "长".repeat(190) + ".mp4",
+    "mp4",
+    "2026-10-20T14:30:00.000Z",
+    100,
+  );
+  assert.equal(result.length, 100);
+  assert.ok(result.endsWith("-20261020143000.mp4"));
 });
 
 test("shellQuote 对特殊字符做 POSIX 转义", () => {

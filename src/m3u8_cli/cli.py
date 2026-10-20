@@ -8,6 +8,7 @@ from pathlib import Path
 
 import requests
 
+from . import __version__
 from .convert import convert_video
 from .download import DownloadOptions, download_hls
 from .errors import HLSException
@@ -18,6 +19,11 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="m3u8-cli",
         description="HLS 下载与视频格式转换工具",
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

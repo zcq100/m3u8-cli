@@ -1,12 +1,13 @@
 "use strict";
 
 (function () {
-  const { deriveOutputName, addTimestampSuffix } = M3U8Lib;
+  const { buildOutputName, addTimestampSuffix } = M3U8Lib;
 
   const DEFAULT_SETTINGS = {
     serverUrl: "http://127.0.0.1:8787",
     token: "",
     format: "mp4",
+    naming: "title",
     overwrite: false,
     sendCookie: true,
     copyCookie: false,
@@ -23,10 +24,13 @@
   const ACTIVE_STATES = new Set(["queued", "running"]);
   const REFRESH_INTERVAL_MS = 2000;
   const SETTINGS_SAVE_DELAY_MS = 300;
+  // 服务端会按输出目录长度截短文件名；重试名保持较短，避免时间戳被截掉。
+  const RETRY_NAME_LIMIT = 100;
 
   const elements = {};
   let currentTabId = null;
   let currentPageUrl = "";
+  let currentPageTitle = "";
   let candidates = [];
   let tasks = [];
   let settings = { ...DEFAULT_SETTINGS };
@@ -50,6 +54,7 @@
     elements.serverUrl = byId("server-url");
     elements.token = byId("token");
     elements.format = byId("format");
+    elements.naming = byId("naming");
     elements.overwrite = byId("overwrite");
     elements.sendCookie = byId("send-cookie");
     elements.copyCookie = byId("copy-cookie");
@@ -93,7 +98,7 @@
     return button;
   }
 
-  function showToast(text) {
+  function showToast(text, duration) {
     elements.toast.textContent = text;
     elements.toast.hidden = false;
     if (toastTimer) {
@@ -102,7 +107,7 @@
     toastTimer = window.setTimeout(() => {
       elements.toast.hidden = true;
       toastTimer = null;
-    }, 2600);
+    }, duration || 2600);
   }
 
   async function copyText(text, label) {
@@ -130,6 +135,9 @@
     candidates = state && Array.isArray(state.items) ? state.items : [];
     if (state && state.pageUrl) {
       currentPageUrl = state.pageUrl;
+    }
+    if (state && state.pageTitle) {
+      currentPageTitle = state.pageTitle;
     }
     renderCandidates();
   }
@@ -160,6 +168,14 @@
       meta.append(cookieBadge);
     }
 
+    let titleEl = null;
+    if (candidate.pageTitle) {
+      titleEl = document.createElement("div");
+      titleEl.className = "candidate-title";
+      titleEl.textContent = candidate.pageTitle;
+      titleEl.title = candidate.pageTitle;
+    }
+
     const url = document.createElement("div");
     url.className = "candidate-url";
     url.textContent = candidate.url;
@@ -178,7 +194,11 @@
       downloadButton,
     );
 
-    item.append(meta, url, actions);
+    item.append(meta);
+    if (titleEl) {
+      item.append(titleEl);
+    }
+    item.append(url, actions);
     return item;
   }
 
@@ -188,6 +208,7 @@
       tabId: currentTabId,
       candidateId: candidate.id,
       format: settings.format,
+      naming: settings.naming,
       includeCookie: settings.copyCookie,
       overwrite: settings.overwrite,
     });
@@ -201,7 +222,13 @@
   async function handleDownload(candidate, container, button, outputOverride) {
     button.disabled = true;
     const output =
-      outputOverride || deriveOutputName(candidate.url, settings.format);
+      outputOverride ||
+      buildOutputName({
+        title: candidate.pageTitle || currentPageTitle,
+        url: candidate.url,
+        format: settings.format,
+        naming: settings.naming,
+      });
     try {
       await saveSettingsNow();
       const response = await sendMessage({
@@ -214,9 +241,11 @@
       });
       if (!response || !response.ok) {
         const message = (response && response.error) || "提交失败";
-        showToast(message);
+        showToast(message, 6000);
         if (response && response.status === 409) {
           showConflict(container, candidate, output, message);
+        } else {
+          showSubmitError(container, message);
         }
         return;
       }
@@ -235,6 +264,31 @@
     }
   }
 
+  /** 下载失败时在候选下方保留错误原因，并提供打开设置的入口。 */
+  function showSubmitError(container, message) {
+    const existing = container.querySelector(".candidate-error");
+    if (existing) {
+      existing.remove();
+    }
+    const box = document.createElement("div");
+    box.className = "candidate-error";
+    const text = document.createElement("span");
+    text.textContent = message;
+    const settingsButton = createButton(
+      "打开设置",
+      () => {
+        const panel = document.querySelector(".settings");
+        if (panel) {
+          panel.open = true;
+        }
+        elements.token.focus();
+      },
+      "ghost small",
+    );
+    box.append(text, settingsButton);
+    container.append(box);
+  }
+
   function showConflict(container, candidate, output, message) {
     const existing = container.querySelector(".candidate-error");
     if (existing) {
@@ -248,7 +302,12 @@
       "换名重试",
       async (button) => {
         box.remove();
-        const newOutput = addTimestampSuffix(output, settings.format);
+        const newOutput = addTimestampSuffix(
+          output,
+          settings.format,
+          undefined,
+          RETRY_NAME_LIMIT,
+        );
         await handleDownload(candidate, container, button, newOutput);
       },
       "ghost small",
@@ -273,6 +332,7 @@
     try {
       await sendMessage({ type: "tab:clear", tabId: currentTabId });
       candidates = [];
+      currentPageTitle = "";
       renderCandidates();
       showToast("已清空");
     } catch (error) {
@@ -412,6 +472,7 @@
     elements.serverUrl.value = settings.serverUrl;
     elements.token.value = settings.token;
     elements.format.value = settings.format === "hls" ? "hls" : "mp4";
+    elements.naming.value = settings.naming === "hash" ? "hash" : "title";
     elements.overwrite.checked = Boolean(settings.overwrite);
     elements.sendCookie.checked = settings.sendCookie !== false;
     elements.copyCookie.checked = Boolean(settings.copyCookie);
@@ -424,6 +485,7 @@
         elements.serverUrl.value.trim() || DEFAULT_SETTINGS.serverUrl,
       token: elements.token.value.trim(),
       format: elements.format.value === "hls" ? "hls" : "mp4",
+      naming: elements.naming.value === "hash" ? "hash" : "title",
       overwrite: elements.overwrite.checked,
       sendCookie: elements.sendCookie.checked,
       copyCookie: elements.copyCookie.checked,
@@ -513,6 +575,7 @@
       elements.serverUrl,
       elements.token,
       elements.format,
+      elements.naming,
       elements.overwrite,
       elements.sendCookie,
       elements.copyCookie,
@@ -529,6 +592,9 @@
           candidates = Array.isArray(state.items) ? state.items : [];
           if (state.pageUrl) {
             currentPageUrl = state.pageUrl;
+          }
+          if (state.pageTitle) {
+            currentPageTitle = state.pageTitle;
           }
           renderCandidates();
         }
@@ -568,6 +634,7 @@
     if (tab) {
       currentTabId = typeof tab.id === "number" ? tab.id : null;
       currentPageUrl = tab.url || "";
+      currentPageTitle = tab.title || "";
     }
 
     await Promise.all([loadSettings(), loadCandidates(), loadTasks()]);

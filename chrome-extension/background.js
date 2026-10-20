@@ -10,7 +10,8 @@ const {
   looksLikePlaylistUrl,
   isHlsContentType,
   normalizeCandidateUrl,
-  deriveOutputName,
+  cleanPageTitle,
+  buildOutputName,
   buildCliCommand,
 } = M3U8Lib;
 
@@ -41,6 +42,7 @@ const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8787",
   token: "",
   format: "mp4",
+  naming: "title",
   overwrite: false,
   sendCookie: true,
   copyCookie: false,
@@ -69,10 +71,14 @@ function headerKey(candidateId) {
   return `hdr:${candidateId}`;
 }
 
+function emptyTabState() {
+  return { pageUrl: "", pageTitle: "", updatedAt: 0, items: [] };
+}
+
 async function readTabState(tabId) {
   const key = tabKey(tabId);
   const data = await chrome.storage.session.get(key);
-  return data[key] || { pageUrl: "", updatedAt: 0, items: [] };
+  return data[key] || emptyTabState();
 }
 
 async function removeHeaders(ids) {
@@ -123,21 +129,26 @@ function addCandidate(tabId, candidate, headers) {
   return enqueueWrite(async () => {
     const key = tabKey(tabId);
     const data = await chrome.storage.session.get(key);
-    const state = data[key] || { pageUrl: "", updatedAt: 0, items: [] };
+    const state = data[key] || emptyTabState();
     const existingIndex = state.items.findIndex(
       (item) => item.url === candidate.url,
     );
+    // 空标题不覆盖已有标题：网络候选可能晚于 DOM 候选、拿不到标题。
+    const patch = { ...candidate };
+    if (!patch.pageTitle) {
+      delete patch.pageTitle;
+    }
 
     let item;
     if (existingIndex >= 0) {
       const existing = state.items[existingIndex];
       state.items.splice(existingIndex, 1);
-      item = { ...existing, ...candidate, id: existing.id };
+      item = { ...existing, ...patch, id: existing.id };
     } else {
       item = {
         id: crypto.randomUUID(),
         capturedAt: Date.now(),
-        ...candidate,
+        ...patch,
       };
     }
     item.hasCookie = Boolean(headers && headers.cookie);
@@ -149,6 +160,9 @@ function addCandidate(tabId, candidate, headers) {
     }
     if (!state.pageUrl && candidate.pageUrl) {
       state.pageUrl = candidate.pageUrl;
+    }
+    if (patch.pageTitle) {
+      state.pageTitle = patch.pageTitle;
     }
     state.updatedAt = Date.now();
 
@@ -202,6 +216,16 @@ function trimPendingHeaders() {
   }
 }
 
+/** 标签页标题；host permission 已覆盖所有 http/https 页面。 */
+async function getTabTitle(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return tab && typeof tab.title === "string" ? tab.title : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 chrome.webRequest.onSendHeaders.addListener(
   (details) => {
     if (details.tabId < 0 || !TRACKED_TYPE_SET.has(details.type)) {
@@ -251,15 +275,21 @@ chrome.webRequest.onHeadersReceived.addListener(
       refererHost: referer ? safeHost(referer) : "",
       pageUrl,
     };
-    addCandidate(
-      details.tabId,
-      candidate,
-      {
-        cookie: captured.cookie || "",
-        referer,
-        userAgent: captured.userAgent || "",
-      },
-    ).catch(() => {});
+    const headers = {
+      cookie: captured.cookie || "",
+      referer,
+      userAgent: captured.userAgent || "",
+    };
+    getTabTitle(details.tabId)
+      .then((rawTitle) => {
+        const pageTitle = cleanPageTitle(rawTitle);
+        return addCandidate(
+          details.tabId,
+          pageTitle ? { ...candidate, pageTitle } : candidate,
+          headers,
+        );
+      })
+      .catch(() => {});
   },
   { urls: ["<all_urls>"], types: TRACKED_TYPES },
   ["responseHeaders"],
@@ -302,6 +332,12 @@ async function handleDomCandidates(message, sender) {
   const base = message.pageUrl || pageUrl;
   const urls = Array.isArray(message.urls) ? message.urls.slice(0, 100) : [];
   const seen = new Set();
+  const tabTitle = cleanPageTitle((sender.tab && sender.tab.title) || "");
+  // iframe 里的 document.title 往往只是播放器自己的标题，优先用顶层标签页标题。
+  const pageTitle =
+    message.frameTop === true
+      ? cleanPageTitle(message.title) || tabTitle
+      : tabTitle || cleanPageTitle(message.title);
 
   for (const raw of urls) {
     const url = normalizeCandidateUrl(raw, base);
@@ -309,17 +345,17 @@ async function handleDomCandidates(message, sender) {
       continue;
     }
     seen.add(url);
-    await addCandidate(
-      tabId,
-      {
-        url,
-        source: "dom",
-        contentType: "",
-        refererHost: "",
-        pageUrl,
-      },
-      null,
-    );
+    const candidate = {
+      url,
+      source: "dom",
+      contentType: "",
+      refererHost: "",
+      pageUrl,
+    };
+    if (pageTitle) {
+      candidate.pageTitle = pageTitle;
+    }
+    await addCandidate(tabId, candidate, null);
   }
 }
 
@@ -366,6 +402,13 @@ function resolveFormat(requested, fallback) {
   return fallback === "hls" ? "hls" : "mp4";
 }
 
+function resolveNaming(requested, fallback) {
+  if (requested === "hash" || requested === "title") {
+    return requested;
+  }
+  return fallback === "hash" ? "hash" : "title";
+}
+
 async function apiFetch(path, options) {
   const settings = await getSettings();
   const base = normalizeServerUrl(settings.serverUrl);
@@ -376,7 +419,21 @@ async function apiFetch(path, options) {
   };
   init.headers.Authorization = `Bearer ${settings.token}`;
 
-  const response = await fetch(base + path, init);
+  let response;
+  try {
+    response = await fetch(base + path, init);
+  } catch (error) {
+    const name = error && error.name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new Error(
+        `连接 ${base} 超时（8 秒）：请确认服务已启动且地址可达`,
+      );
+    }
+    const reason = (error && error.message) || String(error);
+    throw new Error(
+      `无法连接 ${base}（${reason}）：请确认 m3u8-cli serve 已启动、地址和端口正确`,
+    );
+  }
   let payload = null;
   try {
     payload = await response.json();
@@ -393,12 +450,29 @@ async function apiFetch(path, options) {
   return payload;
 }
 
+/** 按命名策略生成输出名；标题缺失时回退到 URL 派生名。 */
+function candidateOutputName(candidate, state, format, naming) {
+  const title = candidate.pageTitle || (state && state.pageTitle) || "";
+  return buildOutputName({
+    title,
+    url: candidate.url,
+    format,
+    naming,
+  });
+}
+
 async function submitDownload(message) {
   const tabId = message.tabId;
   if (!Number.isInteger(tabId) || tabId < 0) {
     return { ok: false, error: "无效的标签页" };
   }
   const settings = await getSettings();
+  if (!settings.token) {
+    return {
+      ok: false,
+      error: "未配置 Token：请在扩展设置中填写 serve 的 token",
+    };
+  }
   const state = await readTabState(tabId);
   const candidate = state.items.find((item) => item.id === message.candidateId);
   if (!candidate) {
@@ -408,8 +482,10 @@ async function submitDownload(message) {
   const key = headerKey(candidate.id);
   const captured = (await chrome.storage.session.get(key))[key] || {};
   const format = resolveFormat(message.format, settings.format);
+  const naming = resolveNaming(message.naming, settings.naming);
   const output =
-    message.output || deriveOutputName(candidate.url, format);
+    message.output ||
+    candidateOutputName(candidate, state, format, naming);
   const overwrite =
     message.overwrite === undefined
       ? Boolean(settings.overwrite)
@@ -471,7 +547,10 @@ async function buildCliMessage(message) {
   const key = headerKey(candidate.id);
   const captured = (await chrome.storage.session.get(key))[key] || {};
   const format = resolveFormat(message.format, settings.format);
-  const output = message.output || deriveOutputName(candidate.url, format);
+  const naming = resolveNaming(message.naming, settings.naming);
+  const output =
+    message.output ||
+    candidateOutputName(candidate, state, format, naming);
   const includeCookie = Boolean(message.includeCookie);
   const overwrite =
     message.overwrite === undefined

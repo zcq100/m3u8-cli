@@ -4,7 +4,24 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from m3u8_cli import __version__
 from m3u8_cli.cli import build_parser, main
+
+
+class VersionTests(unittest.TestCase):
+    def _output(self, flag):
+        with mock.patch("sys.argv", ["m3u8-cli", flag]), \
+                contextlib.redirect_stdout(io.StringIO()) as out, \
+                self.assertRaises(SystemExit) as raised:
+            main()
+        self.assertEqual(raised.exception.code, 0)
+        return out.getvalue().strip()
+
+    def test_short_flag(self):
+        self.assertEqual(self._output("-v"), f"m3u8-cli {__version__}")
+
+    def test_long_flag(self):
+        self.assertEqual(self._output("--version"), f"m3u8-cli {__version__}")
 
 
 class DownloadFlowTests(unittest.TestCase):

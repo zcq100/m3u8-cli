@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import threading
 import time
@@ -216,6 +217,23 @@ class TaskManagerTests(unittest.TestCase):
                     submit(manager, output)
             manager.close()
 
+    def test_long_output_name_shrinks_to_component_limit(self):
+        def runner(options, on_progress=None, cancel=None):
+            return options.output
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = TaskManager(tmp, max_tasks=1, runner=runner)
+            record = submit(manager, "视" * 196 + ".mp4", fmt="mp4")
+
+            self.assertTrue(wait_for(
+                lambda: manager.get(record["id"])["state"]
+                == "succeeded"
+            ))
+            output = manager.get(record["id"])["output"]
+            self.assertLessEqual(len(os.fsencode(output)), 255)
+            self.assertTrue(output.endswith(".mp4"))
+            manager.close()
+
     def test_submit_after_close_rejected(self):
         def runner(options, on_progress=None, cancel=None):
             return options.output
@@ -255,7 +273,7 @@ class TaskManagerTests(unittest.TestCase):
                 manager.cancel("missing")
             manager.close()
 
-    def test_mp4_and_hls_share_task_dir_collision(self):
+    def test_mp4_and_hls_outputs_do_not_collide(self):
         gate = threading.Event()
 
         def runner(options, on_progress=None, cancel=None):
@@ -263,10 +281,11 @@ class TaskManagerTests(unittest.TestCase):
             return options.output
 
         with tempfile.TemporaryDirectory() as tmp:
-            manager = TaskManager(tmp, max_tasks=1, runner=runner)
+            manager = TaskManager(tmp, max_tasks=2, runner=runner)
             submit(manager, "movie", fmt="hls")
-            with self.assertRaises(TaskConflict):
-                submit(manager, "movie.mp4", fmt="mp4")
+            # mp4 是输出目录下的 movie.mp4，hls 是 movie/ 目录，互不占用。
+            record = submit(manager, "movie.mp4", fmt="mp4")
+            self.assertTrue(record["id"])
             gate.set()
             manager.close()
 
@@ -275,9 +294,7 @@ class TaskManagerTests(unittest.TestCase):
             return options.output
 
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "movie"
-            target.mkdir()
-            (target / "movie.mp4").write_text("old")
+            (Path(tmp) / "movie.mp4").write_text("old")
 
             manager = TaskManager(tmp, max_tasks=1, runner=runner)
             with self.assertRaises(TaskConflict):

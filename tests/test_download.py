@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import threading
 import unittest
@@ -7,6 +8,7 @@ from unittest import mock
 
 from m3u8_cli.download import DownloadOptions, download_hls
 from m3u8_cli.errors import DownloadCancelled
+from m3u8_cli.paths import temp_cache_dir
 
 
 class FakeDownloader:
@@ -78,6 +80,80 @@ class DownloadCoreTests(unittest.TestCase):
             self.assertEqual(progress, [(1, 2), (2, 2)])
             mux.assert_called_once()
             self.assertTrue(all(FakeDownloader.decrypt_flags))
+            # 合并成功后临时缓存被清理，元数据留在最终文件旁。
+            self.assertFalse(temp_cache_dir(output).exists())
+            meta = json.loads(
+                (output.parent / (output.name + ".meta.json"))
+                .read_text("utf-8")
+            )
+            self.assertEqual(meta["format"], "mp4")
+            self.assertEqual(meta["url"], "https://example.com/a.m3u8")
+            self.assertEqual(meta["segments"], 2)
+            self.assertEqual(meta["output"], str(output))
+
+    def test_metadata_omits_request_headers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "movie.mp4"
+
+            with mock.patch(
+                "m3u8_cli.download.load_playlist",
+                return_value=make_playlist(),
+            ), mock.patch(
+                "m3u8_cli.download.Downloader", FakeDownloader
+            ), mock.patch(
+                "m3u8_cli.download.combine_segments",
+                return_value=Path(tmp) / "combined.ts",
+            ), mock.patch(
+                "m3u8_cli.download.mux"
+            ):
+                download_hls(
+                    DownloadOptions(
+                        url="https://example.com/a.m3u8",
+                        output=output,
+                        headers={"Cookie": "session=secret"},
+                    )
+                )
+
+            text = (
+                output.parent / (output.name + ".meta.json")
+            ).read_text("utf-8")
+            self.assertNotIn("secret", text)
+            self.assertNotIn("Cookie", text)
+
+    def test_mp4_failure_keeps_temp_cache_for_resume(self):
+        cancel = threading.Event()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "movie.mp4"
+            cache = temp_cache_dir(output)
+
+            def progress(done, total):
+                cancel.set()
+
+            try:
+                with mock.patch(
+                    "m3u8_cli.download.load_playlist",
+                    return_value=make_playlist(segments=3),
+                ), mock.patch(
+                    "m3u8_cli.download.Downloader", FakeDownloader
+                ):
+                    with self.assertRaises(DownloadCancelled):
+                        download_hls(
+                            DownloadOptions(
+                                url="https://example.com/a.m3u8",
+                                output=output,
+                                jobs=1,
+                            ),
+                            on_progress=progress,
+                            cancel=cancel,
+                        )
+
+                self.assertTrue(
+                    (cache / "segment_000000.bin").is_file()
+                )
+                self.assertFalse(output.exists())
+            finally:
+                shutil.rmtree(cache, ignore_errors=True)
 
     def test_cancel_before_start(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,7 +172,7 @@ class DownloadCoreTests(unittest.TestCase):
     def test_mode_change_clears_cached_segments(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "movie" / "movie.mp4"
-            cache = output.parent / "cache"
+            cache = temp_cache_dir(output)
             cache.mkdir(parents=True)
             (cache / "segment_000000.bin").write_bytes(b"old")
             (cache / "state.json").write_text(
@@ -104,29 +180,36 @@ class DownloadCoreTests(unittest.TestCase):
                 "utf-8",
             )
 
-            with mock.patch(
-                "m3u8_cli.download.load_playlist",
-                return_value=make_playlist(segments=0),
-            ), mock.patch(
-                "m3u8_cli.download.Downloader", FakeDownloader
-            ), mock.patch(
-                "m3u8_cli.download.combine_segments",
-                return_value=Path(tmp) / "combined.ts",
-            ), mock.patch(
-                "m3u8_cli.download.mux"
-            ):
-                download_hls(
-                    DownloadOptions(
-                        url="https://example.com/a.m3u8",
-                        output=output,
+            try:
+                with mock.patch(
+                    "m3u8_cli.download.load_playlist",
+                    return_value=make_playlist(segments=0),
+                ), mock.patch(
+                    "m3u8_cli.download.Downloader", FakeDownloader
+                ), mock.patch(
+                    "m3u8_cli.download.combine_segments",
+                    return_value=Path(tmp) / "combined.ts",
+                ), mock.patch(
+                    "m3u8_cli.download.mux"
+                ), mock.patch(
+                    "m3u8_cli.download._cleanup_cache"
+                ):
+                    download_hls(
+                        DownloadOptions(
+                            url="https://example.com/a.m3u8",
+                            output=output,
+                        )
                     )
-                )
 
-            state = json.loads(
-                (cache / "state.json").read_text("utf-8")
-            )
-            self.assertEqual(state["mode"], "mp4")
-            self.assertFalse((cache / "segment_000000.bin").exists())
+                state = json.loads(
+                    (cache / "state.json").read_text("utf-8")
+                )
+                self.assertEqual(state["mode"], "mp4")
+                self.assertFalse(
+                    (cache / "segment_000000.bin").exists()
+                )
+            finally:
+                shutil.rmtree(cache, ignore_errors=True)
 
     def test_cancel_during_download_keeps_completed_segments(self):
         cancel = threading.Event()
@@ -200,6 +283,12 @@ class DownloadCoreTests(unittest.TestCase):
             self.assertFalse(any(FakeDownloader.decrypt_flags))
             text = (output / "playlist.m3u8").read_text("utf-8")
             self.assertIn('URI="key.bin"', text)
+            meta = json.loads(
+                (output / "meta.json").read_text("utf-8")
+            )
+            self.assertEqual(meta["format"], "hls")
+            self.assertEqual(meta["segments"], 1)
+            self.assertEqual(meta["output"], str(output))
 
 
 if __name__ == "__main__":

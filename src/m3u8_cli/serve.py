@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .download import DownloadOptions, download_hls
 from .errors import DownloadCancelled, HLSException
-from .paths import derive_task_paths
+from .paths import fit_output_name
 
 KEEP_TERMINAL = 200
 TERMINAL_STATES = {"succeeded", "failed", "cancelled", "interrupted"}
@@ -113,11 +113,15 @@ class TaskManager:
         self._flusher.start()
 
     def _task_paths(self, fmt, output):
+        """返回 (最终产物路径, 冲突检测键路径)。
+
+        mp4 直接落在输出目录、缓存在系统临时目录，键即最终文件本身；
+        hls 的产物是一个任务目录。
+        """
+        path = (self.output_dir / output).resolve()
         if fmt == "mp4":
-            final, cache = derive_task_paths(self.output_dir / output)
-            return cache.parent / final.name, cache.parent
-        task_dir = (self.output_dir / output).resolve()
-        return task_dir / "playlist.m3u8", task_dir
+            return path, path
+        return path / "playlist.m3u8", path
 
     def submit(self, *, url, fmt, output, jobs, retries, timeout,
                overwrite, headers):
@@ -127,12 +131,17 @@ class TaskManager:
             raise RequestError(f"不支持的格式：{fmt}")
         if not valid_output_name(output):
             raise RequestError("output 必须是纯文件名")
+        try:
+            # 标题派生的长文件名在 Windows 上可能让派生路径超过 MAX_PATH。
+            output = fit_output_name(output, self.output_dir)
+        except HLSException as exc:
+            raise RequestError(str(exc)) from exc
 
         final, task_dir = self._task_paths(fmt, output)
         key = str(task_dir)
 
         with self.lock:
-            if task_dir.exists() and not task_dir.is_dir():
+            if fmt == "hls" and task_dir.exists() and not task_dir.is_dir():
                 raise TaskConflict(
                     f"目标路径不是目录：{task_dir}"
                 )
