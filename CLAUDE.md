@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 这是一个 HLS 视频下载与格式转换工具：
 
 - `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。CLI 通过 argparse 子命令提供 `download`（下载 HLS）、`convert`（转换本地视频）与 `serve`（REST 下载服务）。下载流程并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装，所有下载产物写入以输出文件名派生的任务子目录。
+- `chrome-extension/`：配套 Chrome 扩展（Manifest V3、原生 JS、无构建）。通过 `webRequest` 观察与 DOM 扫描识别 m3u8，可复制链接/CLI 命令，并把候选连同该请求的 `Referer`/`Cookie`/`User-Agent` 提交到 `serve` API；后台用 `chrome.alarms` 轮询任务状态。
 - `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
 
 运行环境依赖 `ffmpeg`（需在 PATH 中）和 `uv`。Python 版本固定为 3.12（见 `.python-version`）。
@@ -37,6 +38,10 @@ uv run m3u8-cli serve --host 0.0.0.0 --port 8787 --output-dir ./downloads
 
 # 单元测试
 uv run python -m unittest discover -s tests -v
+
+# Chrome 扩展：语法检查与纯函数测试
+for f in chrome-extension/{lib,background,content,popup}.js; do node --check "$f"; done
+node --test chrome-extension/lib.test.js
 
 # 打包
 uv build
@@ -74,6 +79,25 @@ uv build
 2. `TaskManager` 按 `--max-tasks` 启动工作线程，复用 `download_hls()`。
 3. `GET /api/tasks` / `GET /api/tasks/{id}` 查询状态与进度；`DELETE` 触发协作式取消。
 4. 状态写入 `<output-dir>/.m3u8-serve-state.json`，请求头只保留在内存。
+
+### Chrome 扩展
+
+`chrome-extension/` 是无构建的 MV3 扩展（Chrome 116+），文件职责：
+
+- `manifest.json`：权限仅 `webRequest`、`storage`、`alarms` 与 `<all_urls>` host permission；content script 注入所有 http/https 页面并开启 `all_frames`。
+- `lib.js`：三端共享纯函数（URL/MIME 判断、输出名清洗、shell 转义、CLI 命令），经典脚本 + UMD 导出；`lib.test.js` 用 Node 内置 test runner 测试。
+- `background.js`：顶层注册 `webRequest` 观察器。`onSendHeaders`（`extraHeaders`）按 `requestId` 缓存 `Cookie/Referer/User-Agent`，`onHeadersReceived` 在请求为 GET/HEAD、状态 2xx 且 URL 以 `.m3u8/.m3u` 结尾或 Content-Type 为 HLS MIME 时创建候选；`onCompleted/onErrorOccurred` 清理缓存。不拦截请求，也不 hook 页面 fetch/XHR。
+- `content.js`：扫描 `video/audio/source`、m3u8 链接与内联脚本文本，MutationObserver 去抖后只上报新增 URL。
+- `popup.*`：候选列表、复制/复制 CLI/下载、任务进度与设置。popup 不直接调用 serve API。
+
+存储与消息协议（改动时同步更新 `chrome-extension/README.md` 与根 README）：
+
+- `storage.session["tab:<tabId>"]`：候选列表（每 tab 最多 30 条）；`storage.session["hdr:<candidateId>"]`：敏感请求头，仅 background 读取。
+- `storage.local["settings"]`：服务地址、token、格式、overwrite、sendCookie、copyCookie。
+- `storage.local["tasks"]`：任务摘要（最多 20 条，优先保留活动任务），不含请求头。
+- 消息：`dom:candidates`（content→background）、`download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`cli:build`、`tab:clear`、`dom:rescan`（popup→background）。
+- 下载必须由用户点击触发；仅透传白名单请求头，Cookie 只在 `storage.session`，不渲染、不落盘。非 loopback 服务地址且开启 Cookie 透传时 UI 显示警告。
+- `apiFetch()` 统一加 Bearer token 与 8 秒超时；任务轮询由 popup 每 2 秒触发，popup 关闭后由 `chrome.alarms` 以 30 秒（旧版 1 分钟）周期继续。
 
 ### 转换流程
 
@@ -116,4 +140,9 @@ uv build
 - serve 不提供下载产物接口，文件留在服务器。
 - serve 重启后任务标记为 `interrupted`，不会自动恢复。
 - 请求头不落盘，重启后无法重放任务。
+- Chrome 扩展只做网络观察与 DOM 扫描，不 hook 页面 fetch/XHR；缓存命中或没有实际请求的地址可能只由 DOM 扫描发现。
+- 扩展候选存于 `storage.session`（浏览器重启清空），每个 tab 最多 30 条；任务历史最多 20 条。
+- 扩展任务轮询最短 30 秒（旧版 Chrome 为 1 分钟），popup 打开时才每 2 秒刷新。
+- SPA 路由切换不会自动清空候选；扩展重载后已有页面需要刷新才能恢复 content script。
+- 扩展不支持 Shadow DOM 内的元素，且无法把 `blob:` 流直接交给 serve。
 - 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、任意目录下的 `playlist.m3u8`、`**/ts/` 与任务目录顶层 6 位编号的 `.ts`/`.m4s` 分片、`key.bin`、`key_%03d.bin`（编号超过 999 时位数增加）、`.m3u8-serve-state.json`、`.key_info.txt`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；`init.mp4` 由 `*.mp4` 覆盖。不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。

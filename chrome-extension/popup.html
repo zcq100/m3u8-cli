@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>m3u8-cli 链接检测器</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="title-row">
+        <span class="logo" aria-hidden="true">▶</span>
+        <h1>m3u8 检测器</h1>
+        <span id="candidate-count" class="count">0</span>
+      </div>
+      <div class="header-actions">
+        <button id="rescan-button" type="button" class="ghost">重新扫描</button>
+        <button id="clear-button" type="button" class="ghost">清空</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div id="empty-state" class="empty">
+          未检测到 m3u8 链接。<br />
+          播放视频或刷新页面后再试。
+        </div>
+        <ul id="candidate-list" class="candidate-list"></ul>
+      </section>
+
+      <section class="section">
+        <div class="section-title-row">
+          <h2>下载任务</h2>
+          <button id="refresh-tasks" type="button" class="ghost small">
+            刷新
+          </button>
+        </div>
+        <div id="task-empty" class="empty small-empty">暂无任务</div>
+        <ul id="task-list" class="task-list"></ul>
+      </section>
+
+      <details class="settings">
+        <summary>设置</summary>
+        <div class="settings-grid">
+          <label>
+            <span>服务地址</span>
+            <input
+              id="server-url"
+              type="text"
+              spellcheck="false"
+              placeholder="http://127.0.0.1:8787"
+            />
+          </label>
+          <label>
+            <span>Token</span>
+            <input
+              id="token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="m3u8-cli serve --token ..."
+            />
+          </label>
+          <label>
+            <span>下载格式</span>
+            <select id="format">
+              <option value="mp4">MP4（合并封装）</option>
+              <option value="hls">HLS（保留分片）</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input id="overwrite" type="checkbox" />
+            <span>覆盖已存在的文件</span>
+          </label>
+          <label class="checkbox">
+            <input id="send-cookie" type="checkbox" />
+            <span>发送捕获到的 Cookie（用于下载）</span>
+          </label>
+          <label class="checkbox">
+            <input id="copy-cookie" type="checkbox" />
+            <span>复制 CLI 命令时包含 Cookie（敏感）</span>
+          </label>
+          <div id="remote-warning" class="warning" hidden>
+            服务地址不是本机，Cookie 会被发送到该地址，请确认其可信。
+          </div>
+          <div class="settings-actions">
+            <button id="test-connection" type="button" class="primary">
+              测试连接
+            </button>
+            <span id="settings-status" class="status"></span>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <script src="lib.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

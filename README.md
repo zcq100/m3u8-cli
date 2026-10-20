@@ -193,6 +193,24 @@ curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
 - 任务列表支持 `?state=running`、`?limit=50&offset=0`；`total` 为过滤后的数量。
 - `--port 0` 时由系统分配端口，实际端口会打印在启动日志中。
 
+## Chrome 扩展
+
+`chrome-extension/` 提供一个 Manifest V3 扩展，用于识别页面中的 m3u8 链接：
+
+- 监听页面网络请求并结合 DOM 扫描，列出当前标签页的 m3u8 地址；
+- 复制链接，或生成带 `Referer`/`Cookie`/`User-Agent` 的 `m3u8-cli download` 命令；
+- 一键提交到本地 `m3u8-cli serve` 下载，并在弹窗中查看进度、取消任务。
+
+安装步骤：打开 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择仓库中的 `chrome-extension/` 目录。
+
+建议以固定 token 和本机监听启动服务，然后在扩展设置中填入相同地址与 token：
+
+```bash
+m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir ./downloads
+```
+
+权限、Cookie 处理与排障说明见 [`chrome-extension/README.md`](chrome-extension/README.md)。
+
 ## 下载输出结构
 
 以 `-o movie.mp4` 为例：
@@ -247,11 +265,15 @@ pyright
 # 单元测试
 uv run python -m unittest discover -s tests -v
 
+# Chrome 扩展：语法检查与单元测试
+for f in chrome-extension/{lib,background,content,popup}.js; do node --check "$f"; done
+node --test chrome-extension/lib.test.js
+
 # 构建 wheel
 uv build
 ```
 
-项目目前没有 lint 或 CI 配置，单元测试使用标准库 unittest。
+项目目前没有 lint 或 CI 配置，Python 单元测试使用标准库 unittest，Chrome 扩展的纯函数测试使用 Node 内置 test runner。
 
 代码结构：
 
@@ -269,6 +291,8 @@ src/m3u8_cli/
 ├── errors.py        # 共享异常
 └── __main__.py      # python -m m3u8_cli
 ```
+
+`chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、无构建），细节见其 README。
 
 `reference/hls_downloader.py` 是早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护。
 
