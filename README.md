@@ -164,7 +164,7 @@ m3u8-cli download "<m3u8_url>" -f hls -o movie
 m3u8-cli serve --host 0.0.0.0 --port 8787 --output-dir ./downloads
 ```
 
-启动日志会打印监听地址、输出目录与自动生成的 `API token`。
+启动日志会打印监听地址、输出目录与 API token；省略 --token 时会自动生成。
 
 ```bash
 # 创建任务
@@ -191,6 +191,7 @@ curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
 - 请求头通过 `headers` 对象传入，用于播放列表、分片与密钥请求，不会被持久化或返回。
 - 状态文件默认 `<output-dir>/.m3u8-serve-state.json`；重启后未完成任务标记为 `interrupted`。
 - 任务列表支持 `?state=running`、`?limit=50&offset=0`；`total` 为过滤后的数量。
+- `--port 0` 时由系统分配端口，实际端口会打印在启动日志中。
 
 ## 下载输出结构
 
@@ -259,7 +260,10 @@ src/m3u8_cli/
 ├── cli.py           # 命令行入口与流程编排
 ├── convert.py       # 视频格式转换（FFmpeg）
 ├── playlist.py      # m3u8 解析
-├── downloader.py    # 并发下载与 AES-128 解密
+├── download.py      # 可复用下载核心（mp4/hls、进度、取消）
+├── hls_export.py    # 本地 HLS 导出
+├── serve.py         # REST API 与任务管理
+├── downloader.py    # 单分片下载、重试与 AES-128 解密
 ├── merge.py         # 分片合并与 FFmpeg 封装
 ├── paths.py         # 任务目录派生
 ├── errors.py        # 共享异常

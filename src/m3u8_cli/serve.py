@@ -39,6 +39,7 @@ def valid_output_name(name):
         and "/" not in name
         and "\\" not in name
         and "\x00" not in name
+        and not name.endswith((".", " "))
     )
 
 
@@ -131,6 +132,10 @@ class TaskManager:
         key = str(task_dir)
 
         with self.lock:
+            if task_dir.exists() and not task_dir.is_dir():
+                raise TaskConflict(
+                    f"目标路径不是目录：{task_dir}"
+                )
             for task in self.tasks.values():
                 if task.state in ("queued", "running"):
                     _, active_dir = self._task_paths(
@@ -231,6 +236,7 @@ class TaskManager:
                 if final_path is not None:
                     task.final_path = final_path
             self._dispatch_locked()
+            self._prune_locked()
             self._save_locked()
 
     def cancel(self, task_id):
@@ -246,6 +252,7 @@ class TaskManager:
                 task.finished_at = utcnow()
                 self._params.pop(task_id, None)
                 self._cancels.pop(task_id, None)
+                self._prune_locked()
                 self._save_locked()
                 return task.to_dict()
             if task.state == "running":
@@ -351,6 +358,7 @@ class TaskManager:
                     task.finished_at = (
                         task.finished_at or utcnow()
                     )
+            self._prune_locked()
             workers = list(self._workers.values())
 
         deadline = time.monotonic() + timeout
@@ -610,7 +618,14 @@ def make_handler(manager, token):
                 self._send_json(413, {"error": "请求体过大"})
                 return
 
-            raw = self.rfile.read(length)
+            try:
+                raw = self.rfile.read(length)
+            except OSError:
+                self.close_connection = True
+                self._send_json(
+                    400, {"error": "读取请求体失败"}
+                )
+                return
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, ValueError):

@@ -116,4 +116,4 @@ uv build
 - serve 不提供下载产物接口，文件留在服务器。
 - serve 重启后任务标记为 `interrupted`，不会自动恢复。
 - 请求头不落盘，重启后无法重放任务。
-- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`key.bin`、`.key_info.txt`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`）；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。
+- 运行产物已在 `.gitignore` 中忽略（`*.mp4`、`*.mkv`、`*.webm`、`playlist.m3u8`、`**/ts/[0-9][0-9][0-9][0-9][0-9][0-9].ts`、`key.bin`、`.key_info.txt`、`*.part`、`*.partial.*`、`*.hls-cache/`、`**/cache/`、`.m3u8-serve-state.json`）。导出的 HLS 产物同样被忽略：`playlist.m3u8`、`%06d.ts`/`%06d.m4s`、`init.mp4` 靠 `*.ts`/`*.m4s`/`*.mp4` 等扩展名规则覆盖，`key*.bin` 靠 `key.bin` 规则覆盖；不要用 `git add -f` 把任务目录、转换产物或缓存加入 Git。

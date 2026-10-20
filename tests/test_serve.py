@@ -352,6 +352,27 @@ class TaskManagerTests(unittest.TestCase):
             self.assertEqual(total, 0)
             manager.close()
 
+    def test_terminal_tasks_pruned_to_200(self):
+        def runner(options, on_progress=None, cancel=None):
+            return options.output
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = TaskManager(tmp, max_tasks=16, runner=runner)
+            for i in range(205):
+                submit(manager, f"movie-{i}")
+            self.assertTrue(wait_for(
+                lambda: all(
+                    task["state"] in
+                    ("succeeded", "failed", "cancelled")
+                    for task in manager.list(limit=500)[0]
+                ),
+                timeout=10,
+            ))
+            tasks, total = manager.list(limit=500)
+            self.assertEqual(total, 200)
+            self.assertEqual(len(tasks), 200)
+            manager.close()
+
 
 if __name__ == "__main__":
     unittest.main()

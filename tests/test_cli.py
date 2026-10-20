@@ -137,10 +137,12 @@ class ServeParserTests(unittest.TestCase):
                 main()
         self.assertEqual(ctx.exception.code, 2)
 
-    def test_serve_rejects_non_positive_limits(self):
+    def test_serve_rejects_invalid_limits(self):
         for argv in (
             ["m3u8-cli", "serve", "--max-tasks", "0"],
             ["m3u8-cli", "serve", "--jobs", "0"],
+            ["m3u8-cli", "serve", "--max-tasks", "-1"],
+            ["m3u8-cli", "serve", "--port", "abc"],
         ):
             with mock.patch("sys.argv", argv), \
                     contextlib.redirect_stderr(io.StringIO()):

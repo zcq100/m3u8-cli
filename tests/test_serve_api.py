@@ -193,6 +193,35 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 413)
 
+    def test_invalid_query_parameters_rejected(self):
+        for query in (
+            "state=bogus",
+            "limit=0",
+            "limit=abc",
+            "offset=-1",
+        ):
+            response = requests.get(
+                f"{self.base}/api/tasks?{query}",
+                headers=self.auth(),
+            )
+            self.assertEqual(response.status_code, 400, query)
+
+    def test_hls_target_file_conflicts(self):
+        from pathlib import Path
+
+        (Path(self.tmp.name) / "movie").write_text("file")
+
+        response = requests.post(
+            f"{self.base}/api/tasks",
+            headers=self.auth(),
+            json={
+                "url": "https://example.com/a.m3u8",
+                "format": "hls",
+                "output": "movie",
+            },
+        )
+        self.assertEqual(response.status_code, 409)
+
 
 class ApiCancelTests(unittest.TestCase):
     def setUp(self):
