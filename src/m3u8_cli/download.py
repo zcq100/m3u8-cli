@@ -78,8 +78,15 @@ def _probe_media(path, fmt):
             command, check=True, capture_output=True, text=True,
             timeout=30,
         )
-        data = json.loads(result.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        output = result.stdout
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", "replace")
+        if not output or not output.strip():
+            return None, "ffprobe 未返回数据"
+        data = json.loads(output)
+    except (
+        OSError, subprocess.SubprocessError, ValueError, TypeError
+    ) as exc:
         return None, f"ffprobe 读取媒体信息失败：{exc}"
     if not isinstance(data, dict):
         return None, "ffprobe 输出格式异常"
@@ -92,31 +99,34 @@ def _probe_media(path, fmt):
 
 def _write_metadata(path, *, options, media_path, segments, fingerprint,
                     started_at):
-    """写入 ffprobe 媒体信息与来源信息；不写请求头，避免 Cookie 落盘。"""
-    probe, warning = _probe_media(media_path, options.format)
-    if warning:
-        print(f"警告：{warning}", file=sys.stderr)
-    data = dict(probe) if probe else {}
-    data["source"] = {
-        "url": options.url,
-        "format": options.format,
-        "started_at": started_at,
-        "finished_at": _utcnow(),
-        "segments": len(segments),
-        "playlist_fingerprint": fingerprint,
-        "verify_tls": options.verify,
-    }
+    """写入 ffprobe 媒体信息与来源信息；不写请求头，避免 Cookie 落盘。
+
+    元数据是附加信息，任何失败都只警告，不影响已完成的下载。
+    """
     temp = path.with_name(path.name + ".part")
     try:
+        probe, warning = _probe_media(media_path, options.format)
+        if warning:
+            print(f"警告：{warning}", file=sys.stderr)
+        data = dict(probe) if probe else {}
+        data["source"] = {
+            "url": options.url,
+            "format": options.format,
+            "started_at": started_at,
+            "finished_at": _utcnow(),
+            "segments": len(segments),
+            "playlist_fingerprint": fingerprint,
+            "verify_tls": options.verify,
+        }
         path.parent.mkdir(parents=True, exist_ok=True)
         temp.write_text(
             json.dumps(data, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         temp.replace(path)
-    except OSError as exc:
+    except Exception as exc:
         temp.unlink(missing_ok=True)
-        print(f"警告：无法写入元数据 {path}：{exc}", file=sys.stderr)
+        print(f"警告：元数据生成失败：{exc}", file=sys.stderr)
 
 
 def _cleanup_cache(cache):

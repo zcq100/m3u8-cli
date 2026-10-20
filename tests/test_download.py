@@ -209,6 +209,57 @@ class DownloadCoreTests(unittest.TestCase):
 
         self.assertIn("-allowed_extensions", run.call_args.args[0])
 
+    def test_probe_handles_missing_stdout(self):
+        completed = mock.Mock(stdout=None)
+
+        with mock.patch(
+            "m3u8_cli.download.shutil.which",
+            return_value="/usr/bin/ffprobe",
+        ), mock.patch(
+            "m3u8_cli.download.subprocess.run",
+            return_value=completed,
+        ):
+            data, warning = _probe_media(Path("/x/movie.mp4"), "mp4")
+
+        self.assertIsNone(data)
+        self.assertIn("未返回数据", warning)
+
+    def test_metadata_failure_does_not_fail_download(self):
+        stderr = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "movie.mp4"
+
+            with mock.patch(
+                "m3u8_cli.download.load_playlist",
+                return_value=make_playlist(),
+            ), mock.patch(
+                "m3u8_cli.download.Downloader", FakeDownloader
+            ), mock.patch(
+                "m3u8_cli.download.combine_segments",
+                return_value=Path(tmp) / "combined.ts",
+            ), mock.patch(
+                "m3u8_cli.download.mux"
+            ), mock.patch(
+                "m3u8_cli.download._probe_media",
+                side_effect=TypeError(
+                    "the JSON object must be str, bytes or bytearray, "
+                    "not NoneType"
+                ),
+            ), contextlib.redirect_stderr(stderr):
+                result = download_hls(
+                    DownloadOptions(
+                        url="https://example.com/a.m3u8",
+                        output=output,
+                    )
+                )
+
+            self.assertEqual(result, output)
+            self.assertIn("元数据生成失败", stderr.getvalue())
+            self.assertFalse(
+                (output.parent / (output.name + ".meta.json")).exists()
+            )
+
     def test_mp4_failure_keeps_temp_cache_for_resume(self):
         cancel = threading.Event()
 

@@ -60,7 +60,7 @@ uv build && uv run python scripts/build_extension.py
 ### 模块划分
 
 - `cli.py`：argparse 子命令（`download` / `convert` / `serve`）、顶层 `-v/--version`（读取包内 `__version__`）、参数校验、流程编排、`state.json` 指纹处理；`main()` 根据 `args.command` 分发到 `run_download()` / `run_convert()` / `run_serve()`，并统一捕获 `HLSException` / `OSError` / `requests.RequestException` / `subprocess.CalledProcessError`。
-- `download.py`：可复用的 `DownloadOptions` 与 `download_hls()`，mp4/hls 两条输出路径、进度回调与协作式取消；成功后用 ffprobe 生成元数据文件（`<产物>.meta.json` / `<任务目录>/meta.json`：顶层为 ffprobe 的 `format`/`streams`（去掉 `filename`），另加 `source` 来源信息，不含 `output` 与请求头；ffprobe 缺失或失败时打印警告并只写 `source`），mp4 合并/hls 导出成功后删除系统临时目录中的分片缓存（失败时保留以便续传）。
+- `download.py`：可复用的 `DownloadOptions` 与 `download_hls()`，mp4/hls 两条输出路径、进度回调与协作式取消；成功后用 ffprobe 生成元数据文件（`<产物>.meta.json` / `<任务目录>/meta.json`：顶层为 ffprobe 的 `format`/`streams`（去掉 `filename`），另加 `source` 来源信息，不含 `output` 与请求头；ffprobe 缺失或失败时打印警告并只写 `source`；元数据阶段任何异常都只警告、不影响下载结果），mp4 合并/hls 导出成功后删除系统临时目录中的分片缓存（失败时保留以便续传）。
 - `hls_export.py`：生成扁平本地 HLS 目录（playlist、分片、fMP4 init、密钥），`--overwrite` 只清理生成条目。
 - `serve.py`：TaskManager（FIFO、并发上限、取消、JSON 持久化）与标准库 HTTP API（`/api/tasks`、`/api/version`）；回环来源（`is_loopback_address()`，含 IPv4-mapped IPv6）默认跳过 token 校验（`make_handler(..., allow_local=False)` 仅供测试关闭）；任务请求的 `insecure`（布尔，默认 false）传给 `DownloadOptions.verify = not insecure`。
 - `convert.py`：格式白名单、编码映射、输出路径派生、覆盖检查与 FFmpeg 调用。

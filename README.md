@@ -276,6 +276,7 @@ movie.partial.mp4       # FFmpeg 临时输出（仅在合并过程中存在）
 - 同一 `-o` 对应同一个缓存目录；播放列表变化时 `state.json` 指纹会触发旧分片清理。
 - 元数据文件由 ffprobe 读取产物生成：顶层 `format`/`streams` 为 `ffprobe -show_format -show_streams -of json` 的输出（已去掉 `filename` 路径），`source` 记录 URL、格式、分片数、指纹、时间与是否校验 TLS；不包含 `output` 字段，也不包含 `Referer`/`Cookie`/`User-Agent`。
 - 未安装 ffprobe 时会在 stderr 打印警告，元数据仅保留 `source` 部分，下载仍继续进行。
+- 元数据生成过程中出现任何异常（包括 ffprobe 无输出、JSON 解析失败）都只打印警告，不会把已完成的下载标记为失败。
 
 ### HLS（保留分片）
 
