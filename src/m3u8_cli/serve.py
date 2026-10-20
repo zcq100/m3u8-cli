@@ -509,7 +509,17 @@ def make_handler(manager, token):
         def _path_parts(self):
             return urlsplit(self.path).path.rstrip("/").split("/")
 
+        def _invalid_path(self):
+            return any(
+                ord(ch) < 32 or ord(ch) == 127
+                for ch in self.path
+            )
+
         def do_OPTIONS(self):
+            if self._invalid_path():
+                self.close_connection = True
+                self._send_json(400, {"error": "无效的请求路径"})
+                return
             self.send_response(204)
             self._cors()
             self.send_header("Content-Length", "0")
@@ -517,6 +527,10 @@ def make_handler(manager, token):
 
         def do_GET(self):
             if not self._require_auth():
+                return
+            if self._invalid_path():
+                self.close_connection = True
+                self._send_json(400, {"error": "无效的请求路径"})
                 return
             try:
                 self._handle_get()
@@ -565,6 +579,10 @@ def make_handler(manager, token):
 
         def do_POST(self):
             if not self._require_auth():
+                return
+            if self._invalid_path():
+                self.close_connection = True
+                self._send_json(400, {"error": "无效的请求路径"})
                 return
             try:
                 self._handle_post()
@@ -617,6 +635,10 @@ def make_handler(manager, token):
 
         def do_DELETE(self):
             if not self._require_auth():
+                return
+            if self._invalid_path():
+                self.close_connection = True
+                self._send_json(400, {"error": "无效的请求路径"})
                 return
             try:
                 parts = self._path_parts()
