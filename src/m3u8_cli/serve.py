@@ -387,9 +387,22 @@ def parse_task_request(payload, default_jobs=8):
     url = payload.get("url")
     if not isinstance(url, str) or not url:
         raise RequestError("url 不能为空")
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
+    try:
+        parts = urlsplit(url)
+        hostname = parts.hostname
+        parts.port
+    except ValueError as exc:
+        raise RequestError("url 无效") from exc
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.netloc
+        or not hostname
+    ):
         raise RequestError("url 必须是 http 或 https 地址")
+    if any(
+        ch.isspace() or ord(ch) < 32 for ch in hostname
+    ):
+        raise RequestError("url 无效")
 
     fmt = payload.get("format", "mp4")
     if fmt not in ("mp4", "hls"):
@@ -411,6 +424,12 @@ def parse_task_request(payload, default_jobs=8):
         for k, v in headers.items()
     ):
         raise RequestError("headers 必须是字符串映射")
+    for name, value in headers.items():
+        if any(
+            ch in name or ch in value
+            for ch in ("\r", "\n", "\x00")
+        ):
+            raise RequestError("headers 包含非法字符")
     if sum(
         len(k) + len(v) for k, v in headers.items()
     ) > MAX_HEADERS_BYTES:
@@ -453,14 +472,20 @@ def make_handler(manager, token):
             body = json.dumps(
                 payload, ensure_ascii=False
             ).encode("utf-8")
-            self.send_response(status)
-            self.send_header(
-                "Content-Type", "application/json; charset=utf-8"
-            )
-            self.send_header("Content-Length", str(len(body)))
-            self._cors()
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header(
+                    "Content-Type",
+                    "application/json; charset=utf-8",
+                )
+                self.send_header(
+                    "Content-Length", str(len(body))
+                )
+                self._cors()
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True
 
         def _authorized(self):
             header = self.headers.get("Authorization", "")
@@ -476,6 +501,7 @@ def make_handler(manager, token):
 
         def _require_auth(self):
             if not self._authorized():
+                self.close_connection = True
                 self._send_json(401, {"error": "未授权"})
                 return False
             return True
@@ -547,6 +573,7 @@ def make_handler(manager, token):
 
         def _handle_post(self):
             if self._path_parts() != ["", "api", "tasks"]:
+                self.close_connection = True
                 self._send_json(404, {"error": "未找到路径"})
                 return
 
@@ -561,6 +588,7 @@ def make_handler(manager, token):
                 self._send_json(400, {"error": "请求体不能为空"})
                 return
             if length > MAX_BODY:
+                self.close_connection = True
                 self._send_json(413, {"error": "请求体过大"})
                 return
 

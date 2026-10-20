@@ -7,6 +7,7 @@ from http.server import ThreadingHTTPServer
 
 import requests
 
+from m3u8_cli.errors import DownloadCancelled
 from m3u8_cli.serve import TaskManager, make_handler
 
 
@@ -97,6 +98,35 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_malformed_urls_rejected(self):
+        for url in (
+            "http://[::1/a.m3u8",
+            "http://exa mple.com/a.m3u8",
+            "https://example.com:abc/a.m3u8",
+        ):
+            response = requests.post(
+                f"{self.base}/api/tasks",
+                headers=self.auth(),
+                json={"url": url},
+            )
+            self.assertEqual(response.status_code, 400, url)
+
+    def test_header_injection_rejected(self):
+        for headers in (
+            {"X-Test": "a\r\nBad: x"},
+            {"X-Test\r\n": "value"},
+            {"X-Test": "a\x00b"},
+        ):
+            response = requests.post(
+                f"{self.base}/api/tasks",
+                headers=self.auth(),
+                json={
+                    "url": "https://example.com/a.m3u8",
+                    "headers": headers,
+                },
+            )
+            self.assertEqual(response.status_code, 400, headers)
+
     def test_invalid_output_rejected(self):
         response = requests.post(
             f"{self.base}/api/tasks",
@@ -162,6 +192,71 @@ class ApiTests(unittest.TestCase):
             data=b"x" * (1024 * 1024 + 1),
         )
         self.assertEqual(response.status_code, 413)
+
+
+class ApiCancelTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.started = threading.Event()
+
+        def runner(options, on_progress=None, cancel=None):
+            self.started.set()
+            if wait_for(cancel.is_set, timeout=5):
+                raise DownloadCancelled("cancelled")
+            raise AssertionError("未被取消")
+
+        self.manager = TaskManager(
+            self.tmp.name,
+            max_tasks=1,
+            default_jobs=2,
+            runner=runner,
+        )
+        self.token = "test-token"
+        self.server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(self.manager, self.token),
+        )
+        self.server.daemon_threads = True
+        self.thread = threading.Thread(
+            target=self.server.serve_forever, daemon=True
+        )
+        self.thread.start()
+        self.base = (
+            f"http://127.0.0.1:{self.server.server_address[1]}"
+        )
+        self.auth = {"Authorization": f"Bearer {self.token}"}
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.manager.close()
+        self.tmp.cleanup()
+
+    def test_delete_running_task(self):
+        response = requests.post(
+            f"{self.base}/api/tasks",
+            headers=self.auth,
+            json={
+                "url": "https://example.com/a.m3u8",
+                "format": "hls",
+                "output": "movie",
+            },
+        )
+        self.assertEqual(response.status_code, 202)
+        task_id = response.json()["task"]["id"]
+        self.assertTrue(self.started.wait(2))
+
+        response = requests.delete(
+            f"{self.base}/api/tasks/{task_id}", headers=self.auth
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.assertTrue(wait_for(
+            lambda: requests.get(
+                f"{self.base}/api/tasks/{task_id}",
+                headers=self.auth,
+            ).json()["task"]["state"] == "cancelled"
+        ))
 
 
 if __name__ == "__main__":
