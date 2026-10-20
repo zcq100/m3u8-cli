@@ -86,7 +86,10 @@ class TaskManagerTests(unittest.TestCase):
             manager.close()
 
     def test_cancel_queued_task(self):
+        started = threading.Event()
+
         def runner(options, on_progress=None, cancel=None):
+            started.set()
             if wait_for(cancel.is_set, timeout=2):
                 raise DownloadCancelled("cancelled")
             raise AssertionError("未被取消")
@@ -94,15 +97,18 @@ class TaskManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = TaskManager(tmp, max_tasks=1, runner=runner)
             first = submit(manager, "one")
+            self.assertTrue(started.wait(1))
             second = submit(manager, "two")
-            self.assertTrue(wait_for(
-                lambda: manager.get(first["id"])["state"] == "running"
-            ))
+            self.assertEqual(
+                manager.get(second["id"])["state"], "queued"
+            )
 
             manager.cancel(second["id"])
             self.assertEqual(
                 manager.get(second["id"])["state"], "cancelled"
             )
+            self.assertNotIn(second["id"], manager._params)
+
             manager.cancel(first["id"])
             self.assertTrue(wait_for(
                 lambda: manager.get(first["id"])["state"]
@@ -203,10 +209,39 @@ class TaskManagerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             manager = TaskManager(tmp, max_tasks=1, runner=runner)
-            for output in ("../evil", "a/b", "..", ""):
+            for output in (
+                "../evil", "a/b", "..", "", "a\\b", "a\x00b"
+            ):
                 with self.assertRaises(RequestError):
                     submit(manager, output)
             manager.close()
+
+    def test_submit_after_close_rejected(self):
+        def runner(options, on_progress=None, cancel=None):
+            return options.output
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = TaskManager(tmp, max_tasks=1, runner=runner)
+            manager.close()
+            with self.assertRaises(RequestError):
+                submit(manager, "movie")
+
+    def test_close_marks_unfinished_tasks_interrupted(self):
+        def runner(options, on_progress=None, cancel=None):
+            wait_for(cancel.is_set, timeout=2)
+            return options.output
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = TaskManager(tmp, max_tasks=1, runner=runner)
+            record = submit(manager, "movie")
+            self.assertTrue(wait_for(
+                lambda: manager.get(record["id"])["state"]
+                == "running"
+            ))
+            manager.close(timeout=0.1)
+            self.assertEqual(
+                manager.get(record["id"])["state"], "interrupted"
+            )
 
     def test_unknown_task_raises(self):
         def runner(options, on_progress=None, cancel=None):

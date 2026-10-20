@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .download import DownloadOptions, download_hls
-from .errors import DownloadCancelled, HLSException
+from .errors import DownloadCancelled
 from .paths import derive_task_paths
 
 KEEP_TERMINAL = 200
@@ -26,6 +26,17 @@ class TaskConflict(RuntimeError):
 
 class TaskNotFound(KeyError):
     pass
+
+
+def valid_output_name(name):
+    return (
+        isinstance(name, str)
+        and name not in ("", ".", "..")
+        and len(name) <= 200
+        and "/" not in name
+        and "\\" not in name
+        and "\x00" not in name
+    )
 
 
 def utcnow():
@@ -88,6 +99,8 @@ class TaskManager:
         self._cancels = {}
         self._dirty = False
         self._stop = threading.Event()
+        self._workers = {}
+        self._closed = False
 
         self._load()
         self._flusher = threading.Thread(
@@ -104,13 +117,11 @@ class TaskManager:
 
     def submit(self, *, url, fmt, output, jobs, retries, timeout,
                overwrite, headers):
+        if self._closed:
+            raise RequestError("服务正在关闭")
         if fmt not in ("mp4", "hls"):
             raise RequestError(f"不支持的格式：{fmt}")
-        if (
-            not output
-            or Path(output).name != output
-            or output in (".", "..")
-        ):
+        if not valid_output_name(output):
             raise RequestError("output 必须是纯文件名")
 
         final, task_dir = self._task_paths(fmt, output)
@@ -156,6 +167,8 @@ class TaskManager:
             return record.to_dict()
 
     def _dispatch_locked(self):
+        if self._closed:
+            return
         while len(self.running) < self.max_tasks and self.queue:
             task_id = self.queue.pop(0)
             task = self.tasks.get(task_id)
@@ -164,9 +177,11 @@ class TaskManager:
             task.state = "running"
             task.started_at = utcnow()
             self.running.add(task_id)
-            threading.Thread(
+            thread = threading.Thread(
                 target=self._run, args=(task_id,), daemon=True
-            ).start()
+            )
+            self._workers[task_id] = thread
+            thread.start()
 
     def _run(self, task_id):
         with self.lock:
@@ -204,6 +219,7 @@ class TaskManager:
         with self.lock:
             task = self.tasks.get(task_id)
             self.running.discard(task_id)
+            self._workers.pop(task_id, None)
             self._cancels.pop(task_id, None)
             if task is not None and task.state == "running":
                 task.state = state
@@ -216,6 +232,8 @@ class TaskManager:
 
     def cancel(self, task_id):
         with self.lock:
+            if self._closed:
+                raise TaskConflict("服务正在关闭")
             task = self.tasks.get(task_id)
             if task is None:
                 raise TaskNotFound(task_id)
@@ -295,8 +313,8 @@ class TaskManager:
                 if i in self.tasks
             ],
         }
-        temp = self.state_file.with_suffix(
-            self.state_file.suffix + ".part"
+        temp = self.state_file.with_name(
+            self.state_file.name + ".part"
         )
         try:
             temp.write_text(
@@ -305,7 +323,9 @@ class TaskManager:
             )
             temp.replace(self.state_file)
         except OSError as exc:
+            temp.unlink(missing_ok=True)
             print(f"状态保存失败：{exc}")
+            return
         self._dirty = False
 
     def _flush_loop(self):
@@ -314,9 +334,28 @@ class TaskManager:
                 if self._dirty:
                     self._save_locked()
 
-    def close(self):
-        self._stop.set()
-        if self._flusher.is_alive():
-            self._flusher.join(timeout=1)
+    def close(self, timeout=5.0):
         with self.lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._stop.set()
+            for event in self._cancels.values():
+                event.set()
+            workers = list(self._workers.values())
+
+        deadline = time.monotonic() + timeout
+        for thread in workers:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(remaining)
+
+        with self.lock:
+            for task in self.tasks.values():
+                if task.state in ("queued", "running"):
+                    task.state = "interrupted"
+                    task.finished_at = (
+                        task.finished_at or utcnow()
+                    )
             self._save_locked()
