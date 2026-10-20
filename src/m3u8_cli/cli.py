@@ -51,6 +51,10 @@ def build_parser():
         "--overwrite", action="store_true",
         help="覆盖已有输出文件",
     )
+    download.add_argument(
+        "-k", "--insecure", action="store_true",
+        help="跳过 TLS 证书校验（仅用于自签名或内网服务）",
+    )
 
     convert = subparsers.add_parser(
         "convert",
@@ -124,6 +128,8 @@ def run_download(args):
         headers["Referer"] = args.referer
     if args.cookie:
         headers["Cookie"] = args.cookie
+    if args.insecure:
+        print("警告：已跳过 TLS 证书校验", file=sys.stderr)
 
     def on_progress(completed, total):
         print(f"\r下载进度：{completed}/{total}", end="", flush=True)
@@ -138,6 +144,7 @@ def run_download(args):
             timeout=args.timeout,
             headers=headers,
             overwrite=args.overwrite,
+            verify=not args.insecure,
         ),
         on_progress=on_progress,
     )

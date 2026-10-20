@@ -38,6 +38,24 @@ class DownloadFlowTests(unittest.TestCase):
         options = download.call_args.args[0]
         self.assertEqual(options.output, Path("output.mp4")
                          if fmt == "mp4" else Path("output"))
+        self.assertTrue(options.verify)
+
+    def test_insecure_flag_disables_verification(self):
+        with mock.patch(
+            "m3u8_cli.cli.download_hls"
+        ) as download, mock.patch(
+            "m3u8_cli.cli.shutil.which",
+            return_value="/usr/bin/ffmpeg",
+        ), mock.patch(
+            "sys.argv",
+            ["m3u8-cli", "download", "https://example.com/a.m3u8",
+             "--insecure"],
+        ), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            main()
+
+        options = download.call_args.args[0]
+        self.assertFalse(options.verify)
 
     def test_mp4_default_output(self):
         self._run(["m3u8-cli", "download", "https://example.com/a.m3u8"],
@@ -67,6 +85,17 @@ class DownloadParserTests(unittest.TestCase):
             ["download", "https://example.com/a.m3u8", "-f", "hls"]
         )
         self.assertEqual(args.format, "hls")
+
+    def test_download_insecure_flag(self):
+        args = build_parser().parse_args(
+            ["download", "https://example.com/a.m3u8", "-k"]
+        )
+        self.assertTrue(args.insecure)
+        self.assertFalse(
+            build_parser().parse_args(
+                ["download", "https://example.com/a.m3u8"]
+            ).insecure
+        )
 
     def test_subcommand_required(self):
         with self.assertRaises(SystemExit):

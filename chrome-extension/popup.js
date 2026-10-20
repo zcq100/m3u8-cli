@@ -11,6 +11,7 @@
     overwrite: false,
     sendCookie: true,
     copyCookie: false,
+    insecure: false,
   };
   const STATE_LABELS = {
     queued: "排队中",
@@ -58,6 +59,7 @@
     elements.overwrite = byId("overwrite");
     elements.sendCookie = byId("send-cookie");
     elements.copyCookie = byId("copy-cookie");
+    elements.insecure = byId("insecure");
     elements.remoteWarning = byId("remote-warning");
     elements.testConnection = byId("test-connection");
     elements.settingsStatus = byId("settings-status");
@@ -476,6 +478,7 @@
     elements.overwrite.checked = Boolean(settings.overwrite);
     elements.sendCookie.checked = settings.sendCookie !== false;
     elements.copyCookie.checked = Boolean(settings.copyCookie);
+    elements.insecure.checked = Boolean(settings.insecure);
     updateRemoteWarning();
   }
 
@@ -489,6 +492,7 @@
       overwrite: elements.overwrite.checked,
       sendCookie: elements.sendCookie.checked,
       copyCookie: elements.copyCookie.checked,
+      insecure: elements.insecure.checked,
     };
   }
 
@@ -579,6 +583,7 @@
       elements.overwrite,
       elements.sendCookie,
       elements.copyCookie,
+      elements.insecure,
     ]) {
       input.addEventListener("input", queueSaveSettings);
       input.addEventListener("change", queueSaveSettings);

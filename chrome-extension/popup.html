@@ -87,6 +87,10 @@
             <input id="copy-cookie" type="checkbox" />
             <span>复制 CLI 命令时包含 Cookie（敏感）</span>
           </label>
+          <label class="checkbox">
+            <input id="insecure" type="checkbox" />
+            <span>跳过 TLS 证书校验（不安全，仅用于自签名/内网服务）</span>
+          </label>
           <div id="remote-warning" class="warning" hidden>
             服务地址不是本机，Cookie 会被发送到该地址，请确认其可信。
           </div>

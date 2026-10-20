@@ -8,6 +8,12 @@ from m3u8_cli.errors import HLSException
 
 
 class DownloaderRawTests(unittest.TestCase):
+    def test_session_applies_verify_flag(self):
+        self.assertTrue(Downloader({}, 30, 0).session().verify)
+        self.assertFalse(
+            Downloader({}, 30, 0, verify=False).session().verify
+        )
+
     def test_raw_mode_skips_decryption(self):
         downloader = Downloader({}, 30, 0)
         ciphertext = b"\x00" * 32

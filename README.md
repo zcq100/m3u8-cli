@@ -163,6 +163,7 @@ HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重�
 | `--cookie` | 无 | 自定义 `Cookie` 请求头 |
 | `--user-agent` | `Mozilla/5.0` | 自定义 `User-Agent` 请求头 |
 | `--overwrite` | 关闭 | 覆盖已存在的最终文件 |
+| `-k, --insecure` | 关闭 | 跳过 TLS 证书校验，仅用于自签名或内网服务 |
 
 ### 保留 HLS（不合并）
 
@@ -175,6 +176,8 @@ m3u8-cli download "<m3u8_url>" -f hls -o movie
 - 普通 TS 流输出 `playlist.m3u8` 与 6 位编号的 `.ts` 分片；fMP4 流输出 `init.mp4` 与 `.m4s` 分片。
 - 源流为 AES-128 加密时保持密文，同时把密钥下载为 `key.bin`（多个不同密钥时为 `key_000.bin`、`key_001.bin`），播放列表的 `EXT-X-KEY` URI 重写为本地文件。
 - 分片、`playlist.m3u8` 与密钥文件位于同一目录；`--overwrite` 只清理本工具生成的条目。
+
+`--insecure` 会关闭播放列表、分片与密钥请求的证书和主机名校验，只应在信任的网络上对自签名服务使用；它不会影响元数据中记录的其他信息。
 
 ### 启动下载服务
 
@@ -193,6 +196,7 @@ curl -X POST http://127.0.0.1:8787/api/tasks \
     "url": "https://example.com/playlist.m3u8",
     "format": "hls",
     "output": "movie",
+    "insecure": false,
     "headers": {"Referer": "https://example.com/"}
   }'
 
@@ -245,7 +249,7 @@ uv run python scripts/build_extension.py
 
 ```
 movie.mp4
-movie.mp4.meta.json     # 来源 URL、格式、分片数、时长、指纹与时间
+movie.mp4.meta.json     # ffprobe 的 format/streams + source 来源信息
 movie.partial.mp4       # FFmpeg 临时输出（仅在合并过程中存在）
 ```
 
@@ -261,7 +265,8 @@ movie.partial.mp4       # FFmpeg 临时输出（仅在合并过程中存在）
 
 - 合并成功后整个缓存目录会被删除；失败或取消时保留，便于续传。
 - 同一 `-o` 对应同一个缓存目录；播放列表变化时 `state.json` 指纹会触发旧分片清理。
-- 元数据文件不包含 `Referer`/`Cookie`/`User-Agent`，但会记录完整来源 URL（可能含临时 token）。
+- 元数据文件由 ffprobe 读取产物生成：顶层 `format`/`streams` 为 `ffprobe -show_format -show_streams -of json` 的输出（已去掉 `filename` 路径），`source` 记录 URL、格式、分片数、指纹、时间与是否校验 TLS；不包含 `output` 字段，也不包含 `Referer`/`Cookie`/`User-Agent`。
+- 未安装 ffprobe 时会在 stderr 打印警告，元数据仅保留 `source` 部分，下载仍继续进行。
 
 ### HLS（保留分片）
 
@@ -272,19 +277,19 @@ movie/
 ├── playlist.m3u8       # 本地播放列表
 ├── 000000.ts           # 分片（fMP4 为 .m4s，另有 init.mp4）
 ├── key.bin             # 存在 AES-128 密钥时
-├── meta.json           # 来源与产物元数据
-└── cache/              # 下载中间产物，成功后保留
-    ├── state.json
-    ├── segment_000000.bin
-    └── combined.ts|mp4
+└── meta.json           # ffprobe 媒体信息 + source 来源信息
 ```
+
+- 分片先下载到系统临时目录，导出成功后清理；输出目录只保留最终产物和元数据。
+- 导出失败或取消时缓存保留，便于用相同 `-o` 续传。
 
 ## 缓存与续传
 
+- 两种格式的分片缓存都位于 `<系统临时目录>/m3u8-cli-<uid>/<最终路径 SHA-256 前 16 位>/`；成功下载后删除，失败/取消时保留。
 - 使用相同 `-o` 且缓存仍在时，已存在且非空的分片会被直接复用。
-- `state.json` 记录播放列表原文的 SHA-256 指纹；播放列表变化时会清除旧分片。
+- 缓存中的 `state.json` 记录播放列表原文的 SHA-256 指纹；播放列表变化时会清除旧分片。
 - 下载时最终文件已存在且未指定 `--overwrite`，程序会直接退出。
-- HLS 的缓存保留在任务目录中；MP4 的缓存在系统临时目录，操作系统清理临时目录后需要重新下载。需要彻底清理时删除对应的缓存/任务目录即可。
+- 操作系统清理临时目录后，失败任务需要重新下载；需要彻底清理时删除对应的临时缓存目录即可。
 
 ## 已知限制
 

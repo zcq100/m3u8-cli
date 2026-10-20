@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS = {
   overwrite: false,
   sendCookie: true,
   copyCookie: false,
+  insecure: false,
 };
 
 /** requestId -> 白名单请求头快照；service worker 休眠后丢失，可接受。 */
@@ -511,6 +512,7 @@ async function submitDownload(message) {
       format,
       output,
       overwrite,
+      insecure: Boolean(settings.insecure),
       headers,
     }),
   });

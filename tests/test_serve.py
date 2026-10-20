@@ -12,6 +12,7 @@ from m3u8_cli.serve import (
     TaskConflict,
     TaskManager,
     TaskNotFound,
+    parse_task_request,
 )
 
 
@@ -233,6 +234,51 @@ class TaskManagerTests(unittest.TestCase):
             self.assertLessEqual(len(os.fsencode(output)), 255)
             self.assertTrue(output.endswith(".mp4"))
             manager.close()
+
+    def test_insecure_task_disables_tls_verification(self):
+        seen = {}
+
+        def runner(options, on_progress=None, cancel=None):
+            seen["verify"] = options.verify
+            return options.output
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = TaskManager(tmp, max_tasks=1, runner=runner)
+            record = manager.submit(
+                url="https://example.com/a.m3u8",
+                fmt="hls",
+                output="movie",
+                jobs=1,
+                retries=3,
+                timeout=30,
+                overwrite=False,
+                headers={},
+                insecure=True,
+            )
+
+            self.assertTrue(wait_for(
+                lambda: manager.get(record["id"])["state"]
+                == "succeeded"
+            ))
+            self.assertIs(seen["verify"], False)
+            manager.close()
+
+    def test_parse_task_request_insecure(self):
+        params = parse_task_request({
+            "url": "https://example.com/a.m3u8",
+            "insecure": True,
+        })
+        self.assertTrue(params["insecure"])
+        self.assertFalse(
+            parse_task_request({
+                "url": "https://example.com/a.m3u8",
+            })["insecure"]
+        )
+        with self.assertRaises(RequestError):
+            parse_task_request({
+                "url": "https://example.com/a.m3u8",
+                "insecure": "yes",
+            })
 
     def test_submit_after_close_rejected(self):
         def runner(options, on_progress=None, cancel=None):

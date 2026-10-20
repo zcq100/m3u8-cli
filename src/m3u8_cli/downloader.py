@@ -12,10 +12,11 @@ from .errors import HLSException
 
 
 class Downloader:
-    def __init__(self, headers, timeout, retries):
+    def __init__(self, headers, timeout, retries, verify=True):
         self.headers = headers
         self.timeout = timeout
         self.retries = retries
+        self.verify = verify
         self.local = threading.local()
         self.keys = {}
         self.key_lock = threading.Lock()
@@ -24,6 +25,7 @@ class Downloader:
         if not hasattr(self.local, "session"):
             self.local.session = requests.Session()
             self.local.session.headers.update(self.headers)
+            self.local.session.verify = self.verify
         return self.local.session
 
     def get_bytes(self, url):

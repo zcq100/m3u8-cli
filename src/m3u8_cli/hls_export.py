@@ -100,13 +100,13 @@ def _check_sources(playlist, cache):
         source = cache / f"segment_{i:06d}.bin"
         if not source.is_file():
             raise HLSException(
-                f"缓存分片缺失：{source}；请删除 cache 目录后重试"
+                f"缓存分片缺失：{source}；请清理缓存后重试"
             )
     if playlist["maps"]:
         source = cache / "map_0000.bin"
         if not source.is_file():
             raise HLSException(
-                f"缓存初始化片段缺失：{source}；请删除 cache 目录后重试"
+                f"缓存初始化片段缺失：{source}；请清理缓存后重试"
             )
 
 

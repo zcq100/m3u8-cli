@@ -3,6 +3,7 @@
 import concurrent.futures
 import json
 import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ from .downloader import Downloader
 from .errors import DownloadCancelled, HLSException
 from .hls_export import export_hls
 from .merge import combine_segments, mux
-from .paths import resolve_mp4_paths, resolve_task_paths
+from .paths import resolve_mp4_paths, temp_cache_dir
 from .playlist import load_playlist
 
 
@@ -26,6 +27,7 @@ class DownloadOptions:
     timeout: int = 30
     headers: dict = field(default_factory=dict)
     overwrite: bool = False
+    verify: bool = True
 
 
 def _check_cancel(cancel):
@@ -38,7 +40,8 @@ def _resolve_paths(options):
         task_dir = Path(options.output).expanduser().resolve()
         if task_dir.exists() and not task_dir.is_dir():
             raise HLSException(f"任务目录不是目录：{task_dir}")
-        return task_dir / "playlist.m3u8", task_dir / "cache"
+        # 中间分片也放系统临时目录，导出成功后清理。
+        return task_dir / "playlist.m3u8", temp_cache_dir(task_dir)
     return resolve_mp4_paths(options.output)
 
 
@@ -55,21 +58,53 @@ def _utcnow():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _write_metadata(path, *, options, output, segments, fingerprint,
+def _probe_media(path, fmt):
+    """用 ffprobe 读取产物信息；缺失或失败时返回 (None, 警告)。"""
+    exe = shutil.which("ffprobe")
+    if not exe:
+        return None, (
+            "未找到 ffprobe，元数据不含媒体信息"
+            "（安装 ffmpeg 后可生成）"
+        )
+    command = [exe, "-v", "error"]
+    if fmt == "hls":
+        # 导出的播放列表可能引用 key.bin，ffprobe 默认拒绝该扩展名。
+        command += ["-allowed_extensions", "ALL"]
+    command += [
+        "-show_format", "-show_streams", "-of", "json", str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True,
+            timeout=30,
+        )
+        data = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return None, f"ffprobe 读取媒体信息失败：{exc}"
+    if not isinstance(data, dict):
+        return None, "ffprobe 输出格式异常"
+    format_info = data.get("format")
+    if isinstance(format_info, dict):
+        # 绝对路径不写入元数据。
+        format_info.pop("filename", None)
+    return data, ""
+
+
+def _write_metadata(path, *, options, media_path, segments, fingerprint,
                     started_at):
-    """记录来源与产物信息；不写入请求头，避免 Cookie 落盘。"""
-    data = {
-        "version": 1,
+    """写入 ffprobe 媒体信息与来源信息；不写请求头，避免 Cookie 落盘。"""
+    probe, warning = _probe_media(media_path, options.format)
+    if warning:
+        print(f"警告：{warning}", file=sys.stderr)
+    data = dict(probe) if probe else {}
+    data["source"] = {
         "url": options.url,
         "format": options.format,
-        "output": str(output),
         "started_at": started_at,
         "finished_at": _utcnow(),
         "segments": len(segments),
-        "duration": round(
-            sum(float(s.get("duration") or 0) for s in segments), 3
-        ),
         "playlist_fingerprint": fingerprint,
+        "verify_tls": options.verify,
     }
     temp = path.with_name(path.name + ".part")
     try:
@@ -96,7 +131,7 @@ def download_hls(options, on_progress=None, cancel=None):
     started_at = _utcnow()
     _check_cancel(cancel)
     final, cache = _resolve_paths(options)
-    task_dir = cache.parent
+    task_dir = final.parent
 
     if final.exists() and not options.overwrite:
         raise HLSException(
@@ -104,15 +139,16 @@ def download_hls(options, on_progress=None, cancel=None):
         )
 
     if options.format == "mp4":
-        # mp4 缓存位于系统临时目录，最终文件目录需单独创建。
         final.parent.mkdir(parents=True, exist_ok=True)
-        cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        cache.mkdir(exist_ok=True, mode=0o700)
-    else:
-        cache.mkdir(parents=True, exist_ok=True)
+    # 两种格式的分片缓存都在系统临时目录。
+    cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cache.mkdir(exist_ok=True, mode=0o700)
 
     print("读取 m3u8...")
-    playlist = load_playlist(options.url, options.headers, options.timeout)
+    playlist = load_playlist(
+        options.url, options.headers, options.timeout,
+        verify=options.verify,
+    )
     segments = playlist["segments"]
     fingerprint = playlist["fingerprint"]
 
@@ -137,7 +173,8 @@ def download_hls(options, on_progress=None, cancel=None):
     )
 
     downloader = Downloader(
-        options.headers, options.timeout, options.retries
+        options.headers, options.timeout, options.retries,
+        verify=options.verify,
     )
 
     key_data = {}
@@ -234,11 +271,13 @@ def download_hls(options, on_progress=None, cancel=None):
         _write_metadata(
             Path(result) / "meta.json",
             options=options,
-            output=result,
+            media_path=Path(result) / "playlist.m3u8",
             segments=segments,
             fingerprint=fingerprint,
             started_at=started_at,
         )
+        # 导出完成后临时缓存不再需要；失败时保留以便续传。
+        _cleanup_cache(cache)
         return result
 
     print("\n所有分片下载完成，开始本地合并")
@@ -249,7 +288,7 @@ def download_hls(options, on_progress=None, cancel=None):
     _write_metadata(
         final.parent / (final.name + ".meta.json"),
         options=options,
-        output=final,
+        media_path=final,
         segments=segments,
         fingerprint=fingerprint,
         started_at=started_at,

@@ -54,6 +54,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 | 覆盖已存在的文件 | 对应 serve 的 `overwrite` 字段 |
 | 发送捕获到的 Cookie | 默认开启，仅发送给上面配置的服务地址 |
 | 复制 CLI 命令时包含 Cookie | 默认关闭；开启后命令会包含 Cookie 原文，注意 shell 历史 |
+| 跳过 TLS 证书校验 | 默认关闭；开启后 serve 请求源站时不校验证书与主机名，仅用于自签名/内网服务 |
 
 ## 使用
 
@@ -101,6 +102,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 - Token 保存在 `storage.local`，请勿在不信任的共享 Chrome 配置中使用。
 - serve 端请求头只保留在内存，不落盘、不在任务响应中返回；详见仓库 README。
 - 扩展不会自动提交下载，必须由用户点击，避免页面借扩展触发 serve 请求。
+- 「跳过 TLS 证书校验」会关闭 serve 到源站的证书与主机名校验，可能暴露下载内容给中间人；仅在确认源站可信（如自签名内网服务）时开启。
 - CORS `*` 不是安全边界，真正的访问控制是 Bearer token。
 
 ## 排障
@@ -114,6 +116,7 @@ uv run m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir 
 | 401 / “未授权” | Token 与服务端不一致；serve 未指定 `--token` 时每次启动都会生成新 token |
 | 409 / 目标文件已存在 | 点击“换名重试”，或在设置中开启“覆盖已存在的文件” |
 | 下载失败，提示 403 | 源站可能校验 `Referer`/`Cookie`/`User-Agent`；确认候选来自“网络”且页面仍处于登录状态 |
+| 失败原因是 `CERTIFICATE_VERIFY_FAILED` / Hostname mismatch | 源站证书不匹配（自签名或内网域名）；确认可信后开启「跳过 TLS 证书校验」 |
 | 扩展重载后页面无反应 | 刷新页面，让 content script 重新注入 |
 | badge 数量未变化 | 网络识别只在页面产生新请求时更新；静态链接由 DOM 扫描或“重新扫描”补充 |
 
@@ -148,7 +151,7 @@ uv run python scripts/build_extension.py
 
 - `storage.session["tab:<tabId>"]`：`{pageUrl, pageTitle, items:[{id,url,source,pageTitle,hasCookie,...}]}`，最多 30 条，标签页关闭或导航时清理。
 - `storage.session["hdr:<candidateId>"]`：`{cookie, referer, userAgent}`，仅 background 读取。
-- `storage.local["settings"]`：服务地址、token、格式、`naming`（`title`/`hash`）等设置。
+- `storage.local["settings"]`：服务地址、token、格式、`naming`（`title`/`hash`）、`insecure`（跳过源站 TLS 校验）等设置。
 - `storage.local["tasks"]`：最近的任务摘要（最多 20 条，优先保留活动任务），不含请求头。
 - popup 通过 `chrome.runtime.sendMessage` 发送 `download:submit`、`task:cancel`、`tasks:refresh`、`settings:test`、`cli:build`、`tab:clear`、`dom:rescan`。
 - content script 通过 `dom:candidates` 上报 URL 与 `title`（附 `frameTop` 标记是否顶层 frame），用 `sender.tab.id` 归属标签页。

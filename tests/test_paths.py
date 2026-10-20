@@ -21,7 +21,10 @@ class FitOutputNameTests(unittest.TestCase):
 
     def test_windows_long_title_stays_within_max_path(self):
         title = "标" * 200 + ".mp4"
-        out_dir = r"C:/Users/tester/Documents/projects/downloads"
+        out_dir = (
+            "C:/Users/tester/Documents/projects/"
+            "very-long-directory-name/downloads"
+        )
         fitted = fit_output_name(title, out_dir, windows=True)
 
         self.assertLess(len(fitted), len(title))
@@ -31,7 +34,6 @@ class FitOutputNameTests(unittest.TestCase):
         paths = [
             final,
             final.parent / (stem + ".partial.mp4"),
-            final.parent / stem / "cache" / "segment_000000.bin",
             temp_cache_dir(final) / "segment_000000.bin",
         ]
         for path in paths:

@@ -32,6 +32,17 @@ class FakeResponse:
 
 
 class PlaylistTests(unittest.TestCase):
+    def test_insecure_disables_tls_verification(self):
+        with mock.patch(
+            "m3u8_cli.playlist.requests.get",
+            return_value=FakeResponse(PLAYLIST),
+        ) as get:
+            load_playlist(
+                "https://example.com/a.m3u8", {}, 30, verify=False
+            )
+
+        self.assertIs(get.call_args.kwargs["verify"], False)
+
     def test_captures_durations_and_media_sequence(self):
         with mock.patch(
             "m3u8_cli.playlist.requests.get",

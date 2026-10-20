@@ -22,20 +22,20 @@ def parse_attrs(line):
     return result
 
 
-def request_text(url, headers, timeout):
+def request_text(url, headers, timeout, verify=True):
     with requests.get(
-        url, headers=headers, timeout=timeout
+        url, headers=headers, timeout=timeout, verify=verify
     ) as response:
         response.raise_for_status()
         return response.text
 
 
-def load_playlist(url, headers, timeout, depth=0):
+def load_playlist(url, headers, timeout, verify=True, depth=0):
     """解析媒体播放列表；如果是 master playlist，选择最高带宽变体。"""
     if depth > 5:
         raise HLSException("主播放列表嵌套层数过多")
 
-    text = request_text(url, headers, timeout)
+    text = request_text(url, headers, timeout, verify=verify)
     lines = [x.strip() for x in text.splitlines() if x.strip()]
 
     if not lines or lines[0] != "#EXTM3U":
@@ -60,7 +60,8 @@ def load_playlist(url, headers, timeout, depth=0):
         variants.sort(reverse=True)
         print(f"发现 {len(variants)} 个清晰度，选择最高带宽变体")
         return load_playlist(
-            variants[0][1], headers, timeout, depth + 1
+            variants[0][1], headers, timeout, verify=verify,
+            depth=depth + 1,
         )
 
     media_sequence = 0

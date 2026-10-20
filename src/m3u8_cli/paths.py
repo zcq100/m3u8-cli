@@ -11,35 +11,9 @@ from .errors import HLSException
 WINDOWS_PATH_LIMIT = 259
 # NTFS 单个文件名上限为 255 UTF-16 单元；常见 POSIX 文件系统为 255 字节。
 NAME_LIMIT = 255
-CACHE_DIR = "cache"
 PARTIAL_SUFFIX = ".partial"
 # 各布局中最深的缓存文件名，用于 Windows 路径预算。
 LONGEST_CACHE_FILE = "segment_000000.bin"
-
-
-def derive_task_paths(output_arg):
-    """返回最终文件路径和缓存目录，不创建任何目录。"""
-    output = Path(output_arg).expanduser().resolve()
-
-    # -o output/name.mp4 时直接复用 output/，避免嵌套成 output/output/。
-    if output.parent.name == output.stem:
-        task_dir = output.parent
-    else:
-        task_dir = output.parent / output.stem
-
-    return output, task_dir / "cache"
-
-
-def resolve_task_paths(output_arg):
-    """返回任务目录内的最终文件路径和缓存目录，并创建任务目录。"""
-    output, cache = derive_task_paths(output_arg)
-    task_dir = cache.parent
-
-    if task_dir.exists() and not task_dir.is_dir():
-        raise HLSException(f"任务目录路径不是目录：{task_dir}")
-
-    task_dir.mkdir(parents=True, exist_ok=True)
-    return output, cache
 
 
 def temp_cache_dir(final_path):
@@ -71,9 +45,9 @@ def fit_output_name(output, output_dir, windows=None):
     """截短输出名，使派生出的产物与缓存路径不超过平台限制。
 
     Windows 上标题类长文件名叠加输出目录后容易超过 MAX_PATH。这里同时检查：
-    mp4 的最终文件与同目录 ``.partial`` 临时文件、hls 的
-    ``<stem>/cache/segment_*.bin``，以及 mp4 系统临时缓存里的分片。
-    其他平台只保证单个文件名不超过 NAME_LIMIT 字节。
+    最终产物与同目录 ``.partial`` 临时文件，以及系统临时缓存里的分片
+    （缓存路径长度固定，与标题长度无关）。其他平台只保证单个文件名不超过
+    NAME_LIMIT 字节。
     """
     if windows is None:
         windows = os.name == "nt"
@@ -100,7 +74,6 @@ def fit_output_name(output, output_dir, windows=None):
             final.parent / (
                 candidate + PARTIAL_SUFFIX + suffix
             ),
-            final.parent / candidate / CACHE_DIR / LONGEST_CACHE_FILE,
             temp_cache_dir(final) / LONGEST_CACHE_FILE,
         ]
         return all(

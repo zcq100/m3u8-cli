@@ -124,7 +124,7 @@ class TaskManager:
         return path / "playlist.m3u8", path
 
     def submit(self, *, url, fmt, output, jobs, retries, timeout,
-               overwrite, headers):
+               overwrite, headers, insecure=False):
         if self._closed:
             raise RequestError("服务正在关闭")
         if fmt not in ("mp4", "hls"):
@@ -177,6 +177,7 @@ class TaskManager:
                 "timeout": timeout,
                 "headers": dict(headers),
                 "overwrite": overwrite,
+                "verify": not insecure,
             }
             self._cancels[record.id] = threading.Event()
             self._dispatch_locked()
@@ -435,6 +436,10 @@ def parse_task_request(payload, default_jobs=8):
     if not isinstance(overwrite, bool):
         raise RequestError("overwrite 必须是布尔值")
 
+    insecure = payload.get("insecure", False)
+    if not isinstance(insecure, bool):
+        raise RequestError("insecure 必须是布尔值")
+
     headers = payload.get("headers", {})
     if not isinstance(headers, dict) or not all(
         isinstance(k, str) and isinstance(v, str)
@@ -460,6 +465,7 @@ def parse_task_request(payload, default_jobs=8):
         "retries": _int_field(payload, "retries", 3, 0, 10),
         "timeout": _int_field(payload, "timeout", 30, 1, 600),
         "overwrite": overwrite,
+        "insecure": insecure,
         "headers": headers,
     }
 
