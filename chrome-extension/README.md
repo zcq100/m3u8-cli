@@ -16,6 +16,18 @@
 
 扩展更新（修改代码）后，需要在 `chrome://extensions` 中点击刷新；已经打开的页面也要刷新一次，content script 才会重新注入。
 
+## 打包分发
+
+```bash
+uv run python scripts/build_extension.py
+# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.zip
+```
+
+- zip 只包含运行时文件（`manifest.json`、`lib.js`、`background.js`、`content.js`、`popup.html/css/js`），不包含测试与文档。
+- 使用固定时间戳，相同源码重复构建得到的 zip 字节一致，便于校验与发布。
+- Chrome Web Store 可直接上传该 zip；本地分发给他人后也可解压并通过“加载已解压的扩展程序”安装。
+- 新增扩展运行时文件时，必须同步 `scripts/build_extension.py` 中的 `RUNTIME_FILES`，否则脚本会拒绝打包并提示缺失项。
+
 ## 启动本地下载服务
 
 扩展的“一键下载”依赖 `m3u8-cli serve`。建议固定 token 并只监听本机：
@@ -105,6 +117,9 @@ node --test lib.test.js
 
 # manifest JSON
 python3 -c "import json; json.load(open('manifest.json'))"
+
+# 生成可分发的扩展 zip
+uv run python scripts/build_extension.py
 ```
 
 ### 文件职责

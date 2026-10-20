@@ -211,6 +211,13 @@ m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir ./downl
 
 权限、Cookie 处理与排障说明见 [`chrome-extension/README.md`](chrome-extension/README.md)。
 
+发布或分发时，可生成只包含运行时文件的扩展 zip：
+
+```bash
+uv run python scripts/build_extension.py
+# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.zip
+```
+
 ## 下载输出结构
 
 以 `-o movie.mp4` 为例：
@@ -269,8 +276,14 @@ uv run python -m unittest discover -s tests -v
 for f in chrome-extension/{lib,background,content,popup}.js; do node --check "$f"; done
 node --test chrome-extension/lib.test.js
 
-# 构建 wheel
+# 构建 Python 包（sdist 同时包含 chrome-extension/ 源码与打包脚本）
 uv build
+
+# 打包 Chrome 扩展 zip（输出到 dist/）
+uv run python scripts/build_extension.py
+
+# 或一次构建全部产物
+uv build && uv run python scripts/build_extension.py
 ```
 
 项目目前没有 lint 或 CI 配置，Python 单元测试使用标准库 unittest，Chrome 扩展的纯函数测试使用 Node 内置 test runner。
@@ -292,7 +305,7 @@ src/m3u8_cli/
 └── __main__.py      # python -m m3u8_cli
 ```
 
-`chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、无构建），细节见其 README。
+`chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、加载时无需构建），细节见其 README；`scripts/build_extension.py` 负责生成可分发的扩展 zip。
 
 `reference/hls_downloader.py` 是早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护。
 

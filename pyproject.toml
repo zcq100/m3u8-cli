@@ -19,6 +19,13 @@ m3u8-cli = "m3u8_cli.cli:main"
 requires = ["uv_build>=0.13.1,<0.14.0"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+# sdist 中附带 Chrome 扩展源码与打包脚本，wheel 仍只包含 Python 包。
+source-include = [
+    "chrome-extension/**",
+    "scripts/build_extension.py",
+]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
