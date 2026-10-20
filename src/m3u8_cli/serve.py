@@ -688,10 +688,11 @@ def run_serve(args):
     server.daemon_threads = True
 
     print(
-        f"监听地址：http://{args.host}:{server.server_address[1]}"
+        f"监听地址：http://{args.host}:{server.server_address[1]}",
+        flush=True,
     )
-    print(f"输出目录：{output_dir}")
-    print(f"API token：{token}")
+    print(f"输出目录：{output_dir}", flush=True)
+    print(f"API token：{token}", flush=True)
 
     try:
         server.serve_forever()
