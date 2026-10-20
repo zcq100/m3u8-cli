@@ -15,70 +15,102 @@
 ## 环境要求
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
 - [FFmpeg](https://ffmpeg.org/)（需要能在 `PATH` 中找到 `ffmpeg`）
+- [uv](https://docs.astral.sh/uv/) 或 pip（任选其一用于安装）
 
 ## 安装
+
+### 使用 uv（推荐）
+
+从远程仓库安装为全局命令：
+
+```bash
+uv tool install git+https://git.r1a.co:5000/zcq100/m3u8_download.git
+```
+
+也可以克隆后从本地目录安装：
 
 ```bash
 git clone https://git.r1a.co:5000/zcq100/m3u8_download.git
 cd m3u8_download
-uv sync
+uv tool install .
 ```
+
+安装后 `m3u8-cli` 已在 `PATH` 中，日常直接运行即可，不需要 `uv run`。
+
+若参与开发，则在仓库目录中执行 `uv sync` 把依赖装进项目的 `.venv`，此时需要使用 `uv run` 前缀。
+
+### 使用 pip
+
+从远程仓库安装：
+
+```bash
+pip install git+https://git.r1a.co:5000/zcq100/m3u8_download.git
+```
+
+或者克隆后从本地目录安装：
+
+```bash
+git clone https://git.r1a.co:5000/zcq100/m3u8_download.git
+cd m3u8_download
+pip install .
+```
+
+升级时加 `--upgrade`：`pip install --upgrade .`。若系统的 Python 启用了 externally-managed 保护（如 Arch、Debian 的默认配置），请先创建并激活虚拟环境再执行上述命令。
 
 ## 使用
 
 ```bash
-uv run m3u8-cli download "<m3u8_url>"
+m3u8-cli download "<m3u8_url>"
 ```
 
 也可以以模块方式运行：
 
 ```bash
-uv run python -m m3u8_cli download "<m3u8_url>"
+python -m m3u8_cli download "<m3u8_url>"
 ```
 
 转换同样支持模块方式：
 
 ```bash
-uv run python -m m3u8_cli convert movie.mp4 -o out
+python -m m3u8_cli convert movie.mp4 -o out
 ```
 
 ### 常用示例
 
 ```bash
 # 默认输出到 output/output.mp4
-uv run m3u8-cli download "https://example.com/playlist.m3u8"
+m3u8-cli download "https://example.com/playlist.m3u8"
 
 # 指定输出文件名与并发数
-uv run m3u8-cli download "https://example.com/playlist.m3u8" -o movie.mp4 -j 16
+m3u8-cli download "https://example.com/playlist.m3u8" -o movie.mp4 -j 16
 
 # 需要 Referer / Cookie 等请求头时
-uv run m3u8-cli download "https://example.com/playlist.m3u8" \
+m3u8-cli download "https://example.com/playlist.m3u8" \
   --referer "https://example.com/" \
   --cookie "session=xxxx"
 
 # 覆盖已存在的最终文件
-uv run m3u8-cli download "https://example.com/playlist.m3u8" -o movie.mp4 --overwrite
+m3u8-cli download "https://example.com/playlist.m3u8" -o movie.mp4 --overwrite
 ```
 
 ### 转换视频
 
 ```bash
 # 默认转换为 HLS：当前目录下生成 movie/playlist.m3u8 与 movie/ts/*.ts
-uv run m3u8-cli convert movie.mp4
+m3u8-cli convert movie.mp4
 
 # 指定输出目录、格式与编码
-uv run m3u8-cli convert movie.mp4 -f mkv -c hevc -o out
+m3u8-cli convert movie.mp4 -f mkv -c hevc -o out
 
 # 转换 HLS 并设置每片 10 秒
-uv run m3u8-cli convert movie.mp4 -f hls --segment-time 10
+m3u8-cli convert movie.mp4 -f hls --segment-time 10
 
 # 覆盖已有产物
-uv run m3u8-cli convert movie.mp4 -f mp4 --overwrite
+m3u8-cli convert movie.mp4 -f mp4 --overwrite
 
 # 加密 HLS 分片（生成 key.bin）
-uv run m3u8-cli convert movie.mp4 --encrypt
+m3u8-cli convert movie.mp4 --encrypt
 ```
 
 | 参数 | 默认值 | 说明 |
