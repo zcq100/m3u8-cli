@@ -342,6 +342,12 @@ class TaskManager:
             self._stop.set()
             for event in self._cancels.values():
                 event.set()
+            for task in self.tasks.values():
+                if task.state in ("queued", "running"):
+                    task.state = "interrupted"
+                    task.finished_at = (
+                        task.finished_at or utcnow()
+                    )
             workers = list(self._workers.values())
 
         deadline = time.monotonic() + timeout
@@ -352,10 +358,4 @@ class TaskManager:
             thread.join(remaining)
 
         with self.lock:
-            for task in self.tasks.values():
-                if task.state in ("queued", "running"):
-                    task.state = "interrupted"
-                    task.finished_at = (
-                        task.finished_at or utcnow()
-                    )
             self._save_locked()
