@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 这是一个 HLS 视频下载与格式转换工具：
 
 - `src/m3u8_cli/`：唯一维护的实现，打包为 `m3u8_cli` 包，提供 `m3u8-cli` 命令和 `python -m m3u8_cli` 两种入口。CLI 通过 argparse 子命令提供 `download`（下载 HLS）、`convert`（转换本地视频）与 `serve`（REST 下载服务）。下载流程并发下载分片、本地缓存/断点续传、AES-128 解密、本地合并后调用 FFmpeg 无损封装，所有下载产物写入以输出文件名派生的任务子目录。
-- `chrome-extension/`：配套 Chrome 扩展（Manifest V3、原生 JS、加载时无需构建）。通过 `webRequest` 观察与 DOM 扫描识别 m3u8，可复制链接/CLI 命令，并把候选连同该请求的 `Referer`/`Cookie`/`User-Agent` 提交到 `serve` API；后台用 `chrome.alarms` 轮询任务状态。`scripts/build_extension.py` 负责把它打成可分发的 zip。
+- `chrome-extension/`：配套 Chrome 扩展（Manifest V3、原生 JS、加载时无需构建）。通过 `webRequest` 观察与 DOM 扫描识别 m3u8，可复制链接/CLI 命令，并把候选连同该请求的 `Referer`/`Cookie`/`User-Agent` 提交到 `serve` API；后台用 `chrome.alarms` 轮询任务状态。`scripts/build_extension.py` 负责把它打包并签名为可分发的 CRX3（依赖 `openssl`，不引入第三方 Python 包）。
 - `reference/hls_downloader.py`：早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护或修改。
 
 运行环境依赖 `ffmpeg`（需在 PATH 中）和 `uv`。Python 版本固定为 3.12（见 `.python-version`）。
@@ -46,11 +46,12 @@ node --test chrome-extension/lib.test.js
 # 打包 Python 包（sdist 同时包含 chrome-extension/ 与打包脚本）
 uv build
 
-# 打包 Chrome 扩展 zip（输出 dist/m3u8-cli-chrome-extension-<版本>.zip）
-uv run python scripts/build_extension.py
+# 打包并签名 Chrome 扩展 CRX3（输出 dist/m3u8-cli-chrome-extension-<版本>.crx）
+# 私钥来源：--key-file / CRX_PRIVATE_KEY_FILE / CRX_PRIVATE_KEY
+uv run python scripts/build_extension.py --key-file ~/.config/m3u8-cli/chrome-extension-signing.pem
 
 # 一次构建全部产物
-uv build && uv run python scripts/build_extension.py
+uv build && uv run python scripts/build_extension.py --key-file ~/.config/m3u8-cli/chrome-extension-signing.pem
 ```
 
 仓库没有 lint 或格式化配置；单元测试使用标准库 unittest。CI 配置在 `.github/workflows/`，只在 GitHub 远程（`github`）上运行，推 Gitea（`origin`）不会触发：
@@ -153,7 +154,7 @@ movie/
 
 `[tool.uv.build-backend] source-include` 把 `chrome-extension/**` 与 `scripts/build_extension.py` 纳入 sdist，wheel 仍只包含 Python 包。
 
-`scripts/build_extension.py` 读取 `manifest.json` 的版本与运行时文件，校验 manifest 引用与 `RUNTIME_FILES` 一致后，以固定时间戳生成确定性的 `dist/m3u8-cli-chrome-extension-<version>.zip`。新增扩展运行时文件时必须同步脚本中的 `RUNTIME_FILES`；`tests/test_build_extension.py` 覆盖产物内容、确定性与非法 manifest/缺失文件场景。
+`scripts/build_extension.py` 读取 `manifest.json` 的版本与运行时文件，校验 manifest 引用与 `RUNTIME_FILES` 一致后，以固定时间戳生成确定性 zip，再用 RSA PKCS#1 v1.5 签名为 `dist/m3u8-cli-chrome-extension-<version>.crx`。私钥由 `--key-file`、`CRX_PRIVATE_KEY_FILE` 或 `CRX_PRIVATE_KEY`（PEM 内容）提供；CI 使用仓库 Secret `CRX_PRIVATE_KEY`。私钥决定扩展 ID，丢失或更换后无法覆盖安装旧版本。新增扩展运行时文件时必须同步脚本中的 `RUNTIME_FILES`；`tests/test_build_extension.py` 覆盖 CRX 结构、确定性、密钥来源与非法 manifest/缺失文件场景。
 
 ## 已知限制
 

@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-"""把 chrome-extension/ 打包为可加载的 Chrome 扩展 zip。
+"""把 chrome-extension/ 打包并签名为 Chrome 可安装的 CRX3 文件。
 
-只包含运行时文件，使用固定时间戳，保证相同源码生成字节一致的产物。
-输出默认写入 dist/，该目录已被 .gitignore 忽略。
+只包含运行时文件，使用固定时间戳与 RSA PKCS#1 v1.5 签名，保证相同源码与私钥
+生成字节一致的产物。私钥通过 --key-file、CRX_PRIVATE_KEY_FILE 或 CRX_PRIVATE_KEY
+环境变量提供，绝不写入仓库。输出默认写入 dist/，该目录已被 .gitignore 忽略。
+
+依赖 PATH 中的 openssl，不使用第三方 Python 包。
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
+import os
+import struct
+import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -38,6 +47,13 @@ REQUIRED_MANIFEST_KEYS = (
 )
 
 FIXED_DATE_TIME = (2020, 1, 1, 0, 0, 0)
+
+CRX_MAGIC = b"Cr24"
+CRX_VERSION = 3
+# Chromium 对 CRX3 签名内容的固定前缀。
+SIGNATURE_CONTEXT = b"CRX3 SignedData\x00"
+KEY_FILE_ENV = "CRX_PRIVATE_KEY_FILE"
+KEY_ENV = "CRX_PRIVATE_KEY"
 
 
 def load_manifest(extension_dir: Path) -> dict:
@@ -119,20 +135,126 @@ def validate_manifest(manifest: dict, extension_dir: Path) -> str:
     return version
 
 
-def write_zip(zip_path: Path, extension_dir: Path) -> None:
-    zip_path.parent.mkdir(parents=True, exist_ok=True)
-    partial_path = zip_path.with_name(zip_path.name + ".partial")
+def build_zip_data(extension_dir: Path) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(
+        buffer, "w", compression=zipfile.ZIP_DEFLATED
+    ) as archive:
+        for name in RUNTIME_FILES:
+            info = zipfile.ZipInfo(name, FIXED_DATE_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, (extension_dir / name).read_bytes())
+    return buffer.getvalue()
+
+
+def varint(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def field_bytes(field: int, data: bytes) -> bytes:
+    """编码 protobuf 的 length-delimited 字段。"""
+    return varint((field << 3) | 2) + varint(len(data)) + data
+
+
+def run_openssl(args: list[str], input_data: bytes | None = None) -> bytes:
     try:
-        with zipfile.ZipFile(
-            partial_path, "w", compression=zipfile.ZIP_DEFLATED
-        ) as archive:
-            for name in RUNTIME_FILES:
-                info = zipfile.ZipInfo(name, FIXED_DATE_TIME)
-                info.compress_type = zipfile.ZIP_DEFLATED
-                info.create_system = 3
-                info.external_attr = 0o100644 << 16
-                archive.writestr(info, (extension_dir / name).read_bytes())
-        partial_path.replace(zip_path)
+        return subprocess.run(
+            ["openssl", *args],
+            input=input_data,
+            check=True,
+            capture_output=True,
+        ).stdout
+    except FileNotFoundError as exc:
+        raise SystemExit("找不到 openssl，请先安装 OpenSSL") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", "replace").strip()
+        raise SystemExit(f"openssl 执行失败：{detail}") from exc
+
+
+def public_key_der(key_path: Path) -> bytes:
+    return run_openssl(
+        ["rsa", "-in", str(key_path), "-pubout", "-outform", "DER"]
+    )
+
+
+def build_crx_data(zip_data: bytes, key_path: Path) -> bytes:
+    public_key = public_key_der(key_path)
+    crx_id = hashlib.sha256(public_key).digest()[:16]
+
+    # SignedData { bytes crx_id = 1; }
+    signed_header_data = field_bytes(1, crx_id)
+    signed_payload = (
+        SIGNATURE_CONTEXT
+        + struct.pack("<I", len(signed_header_data))
+        + signed_header_data
+        + zip_data
+    )
+    signature = run_openssl(
+        ["dgst", "-sha256", "-sign", str(key_path)], input_data=signed_payload
+    )
+
+    # AsymmetricKeyProof { bytes public_key = 1; bytes signature = 2; }
+    proof = field_bytes(1, public_key) + field_bytes(2, signature)
+    # CrxFileHeader { repeated sha256_with_rsa = 2; bytes signed_header_data = 10000; }
+    header = field_bytes(2, proof) + field_bytes(10000, signed_header_data)
+
+    return (
+        CRX_MAGIC
+        + struct.pack("<I", CRX_VERSION)
+        + struct.pack("<I", len(header))
+        + header
+        + zip_data
+    )
+
+
+def resolve_key_path(key_file: Path | None) -> tuple[Path, Path | None]:
+    """返回私钥路径与需要清理的临时文件。"""
+    if key_file is not None:
+        if not key_file.is_file():
+            raise SystemExit(f"找不到私钥文件：{key_file}")
+        return key_file, None
+
+    env_file = os.environ.get(KEY_FILE_ENV)
+    if env_file:
+        path = Path(env_file)
+        if not path.is_file():
+            raise SystemExit(f"找不到私钥文件：{path}")
+        return path, None
+
+    content = os.environ.get(KEY_ENV)
+    if content:
+        if not content.endswith("\n"):
+            content += "\n"
+        fd, temp_name = tempfile.mkstemp(
+            prefix="m3u8-cli-crx-key-", suffix=".pem"
+        )
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        return Path(temp_name), Path(temp_name)
+
+    raise SystemExit(
+        "缺少签名私钥：请用 --key-file 指定 PEM 文件，"
+        f"或设置 {KEY_FILE_ENV} / {KEY_ENV} 环境变量"
+    )
+
+
+def write_output(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial_path = path.with_name(path.name + ".partial")
+    try:
+        partial_path.write_bytes(data)
+        partial_path.replace(path)
     finally:
         partial_path.unlink(missing_ok=True)
 
@@ -140,17 +262,25 @@ def write_zip(zip_path: Path, extension_dir: Path) -> None:
 def build_extension(
     out_dir: Path = DEFAULT_OUT_DIR,
     extension_dir: Path = DEFAULT_EXTENSION_DIR,
+    key_file: Path | None = None,
 ) -> Path:
     manifest = load_manifest(extension_dir)
     version = validate_manifest(manifest, extension_dir)
-    zip_path = out_dir / f"m3u8-cli-chrome-extension-{version}.zip"
-    write_zip(zip_path, extension_dir)
-    return zip_path
+    key_path, cleanup = resolve_key_path(key_file)
+    try:
+        crx_data = build_crx_data(build_zip_data(extension_dir), key_path)
+    finally:
+        if cleanup is not None:
+            cleanup.unlink(missing_ok=True)
+
+    crx_path = out_dir / f"m3u8-cli-chrome-extension-{version}.crx"
+    write_output(crx_path, crx_data)
+    return crx_path
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="把 chrome-extension/ 打包为 Chrome 可加载的 zip"
+        description="把 chrome-extension/ 打包并签名为 CRX3 文件"
     )
     parser.add_argument(
         "--out-dir",
@@ -164,11 +294,20 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_EXTENSION_DIR,
         help="扩展源码目录（默认 chrome-extension/）",
     )
+    parser.add_argument(
+        "--key-file",
+        type=Path,
+        default=None,
+        help=(
+            "RSA 私钥 PEM 文件；省略时依次读取 "
+            f"{KEY_FILE_ENV} 与 {KEY_ENV} 环境变量"
+        ),
+    )
     args = parser.parse_args(argv)
 
-    zip_path = build_extension(args.out_dir, args.extension_dir)
-    size = zip_path.stat().st_size
-    print(f"已生成 {zip_path}（{size} 字节）")
+    crx_path = build_extension(args.out_dir, args.extension_dir, args.key_file)
+    size = crx_path.stat().st_size
+    print(f"已生成 {crx_path}（{size} 字节）")
     return 0
 
 

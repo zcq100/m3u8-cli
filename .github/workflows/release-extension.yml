@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - "chrome-extension/**"
+      - "scripts/build_extension.py"
 
 permissions:
   contents: write
@@ -30,6 +31,8 @@ jobs:
         run: node --test chrome-extension/lib.test.js
 
       - name: Package extension
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
         run: python3 scripts/build_extension.py
 
       - name: Read extension version
@@ -78,6 +81,6 @@ jobs:
         run: |
           tag="chrome-extension-v${VERSION}"
           gh release create "$tag" \
-            "dist/m3u8-cli-chrome-extension-${VERSION}.zip" \
+            "dist/m3u8-cli-chrome-extension-${VERSION}.crx" \
             --title "Chrome Extension v${VERSION}" \
             --generate-notes

@@ -245,11 +245,12 @@ m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir ./downl
 
 See `chrome-extension/README.md` in the repository for permissions, cookie handling and troubleshooting.
 
-To publish or distribute the extension, build a zip containing only the runtime files:
+To publish or distribute the extension, build a signed CRX3 package containing only the runtime files:
 
 ```bash
-uv run python scripts/build_extension.py
-# writes dist/m3u8-cli-chrome-extension-<manifest version>.zip
+# The key comes from --key-file, CRX_PRIVATE_KEY_FILE or CRX_PRIVATE_KEY
+uv run python scripts/build_extension.py --key-file /path/to/signing-key.pem
+# writes dist/m3u8-cli-chrome-extension-<manifest version>.crx
 ```
 
 ## Output layout
@@ -341,8 +342,8 @@ node --test chrome-extension/lib.test.js
 # Build the Python package (the sdist also includes chrome-extension/ sources and the build script)
 uv build
 
-# Build the Chrome extension zip (written to dist/)
-uv run python scripts/build_extension.py
+# Build the signed Chrome extension package (needs a signing key, written to dist/)
+uv run python scripts/build_extension.py --key-file /path/to/signing-key.pem
 
 # Build everything at once
 uv build && uv run python scripts/build_extension.py
@@ -390,7 +391,7 @@ src/m3u8_cli/
 └── __main__.py      # python -m m3u8_cli
 ```
 
-`chrome-extension/` is the companion Chrome extension (MV3, plain JS, no build step needed); see its README for details. `scripts/build_extension.py` produces the distributable extension zip.
+`chrome-extension/` is the companion Chrome extension (MV3, plain JS, no build step needed); see its README for details. `scripts/build_extension.py` signs the distributable extension package as CRX3 using `openssl`.
 
 `reference/hls_downloader.py` is an early lightweight implementation that hands the m3u8 directly to FFmpeg; it is kept for reference only and is no longer maintained.
 

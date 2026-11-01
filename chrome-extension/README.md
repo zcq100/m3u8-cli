@@ -20,13 +20,15 @@
 ## 打包分发
 
 ```bash
-uv run python scripts/build_extension.py
-# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.zip
+# 私钥来自 --key-file、CRX_PRIVATE_KEY_FILE 或 CRX_PRIVATE_KEY
+uv run python scripts/build_extension.py --key-file /path/to/signing-key.pem
+# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.crx
 ```
 
-- zip 只包含运行时文件（`manifest.json`、`lib.js`、`background.js`、`content.js`、`popup.html/css/js`），不包含测试与文档。
-- 使用固定时间戳，相同源码重复构建得到的 zip 字节一致，便于校验与发布。
-- Chrome Web Store 可直接上传该 zip；本地分发给他人后也可解压并通过“加载已解压的扩展程序”安装。
+- CRX 只包含运行时文件（`manifest.json`、`lib.js`、`background.js`、`content.js`、`popup.html/css/js`），不包含测试与文档。
+- 使用固定时间戳与 RSA PKCS#1 v1.5 签名，相同源码与私钥重复构建得到的 CRX 字节一致，便于校验与发布。
+- 私钥决定扩展 ID，必须长期保存；更换私钥后扩展 ID 会变化，无法覆盖安装旧版本。
+- Chrome 已限制直接安装商店外的 CRX；本地开发仍建议用“加载已解压的扩展程序”，CRX 适合企业策略或受控分发。
 - 新增扩展运行时文件时，必须同步 `scripts/build_extension.py` 中的 `RUNTIME_FILES`，否则脚本会拒绝打包并提示缺失项。
 
 ## 启动本地下载服务
@@ -133,8 +135,8 @@ node --test lib.test.js
 # manifest JSON
 python3 -c "import json; json.load(open('manifest.json'))"
 
-# 生成可分发的扩展 zip
-uv run python scripts/build_extension.py
+# 生成可分发的扩展 CRX（需要签名私钥）
+uv run python scripts/build_extension.py --key-file /path/to/signing-key.pem
 ```
 
 ### 文件职责
