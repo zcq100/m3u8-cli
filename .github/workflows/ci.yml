@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Run unit tests
+        run: uv run python -m unittest discover -s tests -v
+
+  extension:
+    name: Chrome extension checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - name: Syntax check
+        run: |
+          for f in lib.js background.js content.js popup.js; do
+            node --check "chrome-extension/$f"
+          done
+      - name: Run unit tests
+        run: node --test chrome-extension/lib.test.js

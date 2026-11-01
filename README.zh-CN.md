@@ -1,0 +1,403 @@
+# m3u8-cli
+
+[English](README.md) | 简体中文
+
+一个基于 Python 的 HLS（m3u8）视频下载与格式转换工具：并发下载分片、支持 AES-128 解密、本地缓存与断点续传，最后通过 FFmpeg 无损封装为 MP4；也可以把本地视频转换为 HLS 或其他常见格式。
+
+## 特性
+
+- **清晰度选择**：自动解析 master playlist，选择 `BANDWIDTH` 最高的变体。
+- **并发下载**：多线程下载分片，默认 8 并发，可按需调整。
+- **AES-128 解密**：支持标准 HLS AES-128 加密（`KEYFORMAT=identity`）。
+- **断点续传**：分片保存在本地任务目录，中断后重新运行会复用已下载分片。
+- **任务隔离**：最终视频与中间缓存集中放在以输出文件名命名的子目录中。
+- **无损封装**：本地合并分片后一次性调用 FFmpeg，使用 `-c copy` 与 `+faststart` 封装为 MP4。
+- **格式转换**：把本地视频转换为 HLS、MP4、MKV 或 WebM，支持 H.264、HEVC 与流复制。
+
+## 环境要求
+
+- Python 3.12+
+- [FFmpeg](https://ffmpeg.org/)（需要能在 `PATH` 中找到 `ffmpeg`）
+- [uv](https://docs.astral.sh/uv/) 或 pip（任选其一用于安装）
+
+## 安装
+
+### 使用 uv（推荐）
+
+从 PyPI 安装为全局命令：
+
+```bash
+uv tool install m3u8-cli
+```
+
+升级：
+
+```bash
+uv tool upgrade m3u8-cli
+```
+
+也可以克隆后从本地源码安装：
+
+```bash
+git clone <仓库地址>
+cd m3u8-cli
+uv tool install .
+```
+
+安装后 `m3u8-cli` 已在 `PATH` 中，日常直接运行即可，不需要 `uv run`。
+
+若参与开发，则在仓库目录中执行 `uv sync` 把依赖装进项目的 `.venv`，此时需要使用 `uv run` 前缀。
+
+### 使用 pip
+
+从 PyPI 安装：
+
+```bash
+pip install m3u8-cli
+```
+
+升级：
+
+```bash
+pip install --upgrade m3u8-cli
+```
+
+也可以克隆后从本地源码安装：
+
+```bash
+git clone <仓库地址>
+cd m3u8-cli
+pip install .
+```
+
+若系统的 Python 启用了 externally-managed 保护（如 Arch、Debian 的默认配置），请先创建并激活虚拟环境再执行上述命令。
+
+## 使用
+
+```bash
+m3u8-cli download "<m3u8_url>"
+```
+
+也可以以模块方式运行：
+
+```bash
+python -m m3u8_cli download "<m3u8_url>"
+```
+
+转换同样支持模块方式：
+
+```bash
+python -m m3u8_cli convert movie.mp4 -o out
+```
+
+查看版本：
+
+```bash
+m3u8-cli -v       # 或 --version
+```
+
+### 常用示例
+
+```bash
+# 默认输出到当前目录的 output.mp4
+m3u8-cli download "https://example.com/playlist.m3u8"
+
+# 指定输出文件名与并发数
+m3u8-cli download "https://example.com/playlist.m3u8" -o movie.mp4 -j 16
+
+# 需要 Referer / Cookie 等请求头时
+m3u8-cli download "https://example.com/playlist.m3u8" \
+  --referer "https://example.com/" \
+  --cookie "session=xxxx"
+
+# 覆盖已存在的最终文件
+m3u8-cli download "https://example.com/playlist.m3u8" -o movie.mp4 --overwrite
+```
+
+### 转换视频
+
+```bash
+# 默认转换为 HLS：当前目录下生成 movie/playlist.m3u8 与 movie/ts/*.ts
+m3u8-cli convert movie.mp4
+
+# 指定输出目录、格式与编码
+m3u8-cli convert movie.mp4 -f mkv -c hevc -o out
+
+# 转换 HLS 并设置每片 10 秒
+m3u8-cli convert movie.mp4 -f hls --segment-time 10
+
+# 覆盖已有产物
+m3u8-cli convert movie.mp4 -f mp4 --overwrite
+
+# 加密 HLS 分片（生成 key.bin）
+m3u8-cli convert movie.mp4 --encrypt
+```
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `input` | 必填 | 本地视频文件路径 |
+| `-f, --format` | `hls` | `hls`、`mp4`、`mkv`、`webm` |
+| `-c, --codec` | `h264` | `h264`、`hevc`、`copy` |
+| `-o, --output-dir` | 输入文件 stem | 输出目录 |
+| `--segment-time` | `6` | 仅 HLS 使用 |
+| `--overwrite` | 关闭 | 覆盖已有产物 |
+| `--encrypt` | 关闭 | 仅 HLS；生成 `key.bin` 并加密分片 |
+
+HLS 输出固定为 `playlist.m3u8` 加 `ts/000000.ts` 起的分片；WebM 重编码时使用 VP9 + Opus，`-c copy` 则直接复制源编码并由 FFmpeg 判断兼容性。
+
+- `mp4`/`mkv`/`webm` 输出为 `<输出目录>/<输入文件 stem>.<扩展名>`，例如 `m3u8-cli convert movie.mp4 -f mkv -o out` 生成 `out/movie.mkv`；单文件先写入 `.partial.*`，成功后原子替换。
+- `-c copy` 时 HLS 分片边界由源关键帧决定，`--segment-time` 只是近似目标。
+- `--encrypt` 仅用于 HLS：输出目录会额外生成 16 字节的 `key.bin`，播放列表通过相对 URI 引用；分发时必须与 `playlist.m3u8` 放在一起。
+- FFmpeg/ffprobe 默认拒绝 `key.bin` 扩展名，本地播放或探测需加 `-allowed_extensions ALL`；浏览器播放器不受此限制。
+- 每次 `--encrypt` 转换都会生成新密钥；未指定 `--overwrite` 时已有 `key.bin` 或 `.key_info.txt` 会阻止转换，指定后会替换旧密钥，需要重新分发 `key.bin`。
+
+### 下载参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `url` | 必填 | m3u8 播放列表地址 |
+| `-f, --format` | `mp4` | `mp4`（合并封装）或 `hls`（保留分片，不合并） |
+| `-o, --output` | `output.mp4` / `output` | mp4 为最终文件名；hls 为任务目录（格式不同，默认值不同） |
+| `-j, --jobs` | `8` | 并发下载线程数 |
+| `--retries` | `3` | 单个分片下载失败后的重试次数 |
+| `--timeout` | `30` | 网络请求超时（秒） |
+| `--referer` | 无 | 自定义 `Referer` 请求头 |
+| `--cookie` | 无 | 自定义 `Cookie` 请求头 |
+| `--user-agent` | `Mozilla/5.0` | 自定义 `User-Agent` 请求头 |
+| `--overwrite` | 关闭 | 覆盖已存在的最终文件 |
+| `-k, --insecure` | 关闭 | 跳过 TLS 证书校验，仅用于自签名或内网服务 |
+
+### 保留 HLS（不合并）
+
+```bash
+# 输出 movie/playlist.m3u8 与 movie/000000.ts 等分片
+m3u8-cli download "<m3u8_url>" -f hls -o movie
+```
+
+- `-f hls` 不调用 FFmpeg；分片保持服务器返回的原始字节。
+- 普通 TS 流输出 `playlist.m3u8` 与 6 位编号的 `.ts` 分片；fMP4 流输出 `init.mp4` 与 `.m4s` 分片。
+- 源流为 AES-128 加密时保持密文，同时把密钥下载为 `key.bin`（多个不同密钥时为 `key_000.bin`、`key_001.bin`），播放列表的 `EXT-X-KEY` URI 重写为本地文件。
+- 分片、`playlist.m3u8` 与密钥文件位于同一目录；`--overwrite` 只清理本工具生成的条目。
+
+`--insecure` 会关闭播放列表、分片与密钥请求的证书和主机名校验，只应在信任的网络上对自签名服务使用；它不会影响元数据中记录的其他信息。
+
+### 启动下载服务
+
+```bash
+m3u8-cli serve --host 0.0.0.0 --port 8787 --output-dir ./downloads
+```
+
+启动日志会打印监听地址、输出目录与 API token；省略 --token 时会自动生成。
+
+来源为回环地址（`127.0.0.0/8`、`::1`，含 IPv4-mapped IPv6）的请求**免 token**，方便本机扩展/脚本直接使用；其他来源仍需 `Authorization: Bearer <token>`。注意：
+
+- 这意味着同一台机器上的其他用户或进程也能免 token 访问；如果通过监听在本机的反向代理转发请求，所有流量看起来都来自回环地址。
+- API 的 CORS 为 `*`，免 token 也意味着浏览器里的任意网页都能调用本机 serve（读取任务、提交下载）。如果在意这一点，请保留 Token（网页无法获取 Token），或自行收紧 CORS。
+
+```bash
+# 创建任务
+curl -X POST http://127.0.0.1:8787/api/tasks \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/playlist.m3u8",
+    "format": "hls",
+    "output": "movie",
+    "insecure": false,
+    "headers": {"Referer": "https://example.com/"}
+  }'
+
+# 任务列表 / 详情
+curl http://127.0.0.1:8787/api/tasks -H "Authorization: Bearer <token>"
+curl http://127.0.0.1:8787/api/tasks/<id> -H "Authorization: Bearer <token>"
+
+# 服务版本
+curl http://127.0.0.1:8787/api/version -H "Authorization: Bearer <token>"
+
+# 取消任务
+curl -X DELETE http://127.0.0.1:8787/api/tasks/<id> \
+  -H "Authorization: Bearer <token>"
+```
+
+- 全局最多 `--max-tasks` 个任务同时运行，其余 FIFO 排队；每个任务内部由 `jobs` 控制分片并发。
+- 请求头通过 `headers` 对象传入，用于播放列表、分片与密钥请求，不会被持久化或返回。
+- 状态文件默认 `<output-dir>/.m3u8-serve-state.json`；重启后未完成任务标记为 `interrupted`。
+- 任务列表支持 `?state=running`、`?limit=50&offset=0`；`total` 为过滤后的数量。
+- `--port 0` 时由系统分配端口，实际端口会打印在启动日志中。
+
+## Chrome 扩展
+
+`chrome-extension/` 提供一个 Manifest V3 扩展，用于识别页面中的 m3u8 链接：
+
+- 监听页面网络请求并结合 DOM 扫描，列出当前标签页的 m3u8 地址；
+- 采集页面标题（`og:title`、Twitter Card、JSON-LD、`document.title`）作为默认下载文件名，也可在设置中改用 URL 短 hash；
+- 复制链接，或生成带 `Referer`/`Cookie`/`User-Agent` 的 `m3u8-cli download` 命令；
+- 一键提交到本地 `m3u8-cli serve` 下载，并在弹窗中查看进度、取消任务；
+- 设置页显示扩展版本与后端 `serve` 版本（依赖 `GET /api/version`）。
+
+安装步骤：打开 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择仓库中的 `chrome-extension/` 目录。
+
+建议以固定 token 和本机监听启动服务，然后在扩展设置中填入相同地址与 token：
+
+```bash
+m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir ./downloads
+```
+
+权限、Cookie 处理与排障说明见源码仓库中的 `chrome-extension/README.md`。
+
+发布或分发时，可生成只包含运行时文件的扩展 zip：
+
+```bash
+uv run python scripts/build_extension.py
+# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.zip
+```
+
+## 下载输出结构
+
+### MP4（默认，合并封装）
+
+以 `-o movie.mp4` 为例，输出目录下只有最终产物和元数据：
+
+```
+movie.mp4
+movie.mp4.meta.json     # ffprobe 的 format/streams + source 来源信息
+movie.partial.mp4       # FFmpeg 临时输出（仅在合并过程中存在）
+```
+
+分片缓存不落在输出目录，而是位于系统临时目录：
+
+```
+<TMP>/m3u8-cli-<uid>/<最终路径哈希>/
+├── state.json          # 播放列表指纹，用于缓存失效判断
+├── segment_000000.bin  # 已解密的媒体分片
+├── map_0000.bin        # fMP4 初始化片段（仅 fMP4 流）
+└── combined.ts|mp4     # 本地合并的中间文件
+```
+
+- 合并成功后整个缓存目录会被删除；失败或取消时保留，便于续传。
+- 同一 `-o` 对应同一个缓存目录；播放列表变化时 `state.json` 指纹会触发旧分片清理。
+- 元数据文件由 ffprobe 读取产物生成：顶层 `format`/`streams` 为 `ffprobe -show_format -show_streams -of json` 的输出（已去掉 `filename` 路径），`source` 记录 URL、格式、分片数、指纹、时间与是否校验 TLS；不包含 `output` 字段，也不包含 `Referer`/`Cookie`/`User-Agent`。
+- 未安装 ffprobe 时会在 stderr 打印警告，元数据仅保留 `source` 部分，下载仍继续进行。
+- 元数据生成过程中出现任何异常（包括 ffprobe 无输出、JSON 解析失败）都只打印警告，不会把已完成的下载标记为失败。
+
+### HLS（保留分片）
+
+以 `-o movie` 为例：
+
+```
+movie/
+├── playlist.m3u8       # 本地播放列表
+├── 000000.ts           # 分片（fMP4 为 .m4s，另有 init.mp4）
+├── key.bin             # 存在 AES-128 密钥时
+└── meta.json           # ffprobe 媒体信息 + source 来源信息
+```
+
+- 分片先下载到系统临时目录，导出成功后清理；输出目录只保留最终产物和元数据。
+- 导出失败或取消时缓存保留，便于用相同 `-o` 续传。
+
+## 缓存与续传
+
+- 两种格式的分片缓存都位于 `<系统临时目录>/m3u8-cli-<uid>/<最终路径 SHA-256 前 16 位>/`；成功下载后删除，失败/取消时保留。
+- 使用相同 `-o` 且缓存仍在时，已存在且非空的分片会被直接复用。
+- 缓存中的 `state.json` 记录播放列表原文的 SHA-256 指纹；播放列表变化时会清除旧分片。
+- 下载时最终文件已存在且未指定 `--overwrite`，程序会直接退出。
+- 操作系统清理临时目录后，失败任务需要重新下载；需要彻底清理时删除对应的临时缓存目录即可。
+
+## 已知限制
+
+- 不支持 `EXT-X-BYTERANGE`，也不支持带 BYTERANGE 的初始化片段。
+- 只支持单个初始化片段（`EXT-X-MAP`）。
+- 只支持 AES-128（`KEYFORMAT=identity`），不支持 SAMPLE-AES 或任何 DRM。
+- 播放列表只抓取一次，不刷新直播或事件播放列表的滑动窗口。
+- 不支持多音轨/多字幕轨道的选择性下载。
+- `convert` 仅接受本地文件；`-c copy` 不做源编码兼容性预检。
+- HLS 转换在 `--overwrite` 时会先删除旧 `playlist.m3u8` 和 `ts/` 中 6 位编号的分片，保留其他文件（`--encrypt` 时 `key.bin` 会被新密钥替换）；转换失败将丢失旧产物，并可能留下部分新分片，新写入的 `key.bin` 也会被删除。
+- HLS AES-128 加密不是 DRM；能访问 `key.bin` 的客户端即可解密。
+- FFmpeg 的 HLS muxer 会写入固定 `IV=0`，所有分片共用同一密钥与 IV。
+- 不支持自定义密钥、密钥 URI 或 IV。
+- serve 不做 SSRF 内网地址屏蔽；回环地址请求免 token，非本机来源仍依赖 token 与局域网部署。
+- 回环免 token 对同一台机器上的所有用户生效；多用户主机或本机反向代理场景请谨慎，必要时只监听 `127.0.0.1`。
+- Windows 默认 `MAX_PATH=260`：serve 会按输出目录长度截短过长的文件名（保留扩展名），任务响应中返回实际名字；CLI 的 `-o` 不做改写。
+- serve 不提供下载产物接口，文件留在服务器。
+- serve 重启后任务标记为 `interrupted`，不会自动恢复。
+- 请求头不落盘，重启后无法重放任务。
+
+## 开发
+
+```bash
+# 编译检查
+uv run python -m compileall -q src
+
+# 类型检查（使用 .venv）
+pyright
+
+# 单元测试
+uv run python -m unittest discover -s tests -v
+
+# Chrome 扩展：语法检查与单元测试
+for f in chrome-extension/{lib,background,content,popup}.js; do node --check "$f"; done
+node --test chrome-extension/lib.test.js
+
+# 构建 Python 包（sdist 同时包含 chrome-extension/ 源码与打包脚本）
+uv build
+
+# 打包 Chrome 扩展 zip（输出到 dist/）
+uv run python scripts/build_extension.py
+
+# 或一次构建全部产物
+uv build && uv run python scripts/build_extension.py
+```
+
+项目使用 GitHub Actions 做测试与发布：Python 单元测试走标准库 unittest，Chrome 扩展的纯函数测试走 Node 内置 test runner。
+
+### CI 与发布
+
+CI 只配置在 GitHub 远程（`github.com/zcq100/m3u8-cli`）。向 Gitea（`origin`）推送**不会**触发任何流水线，需要额外执行：
+
+```bash
+git push github master
+```
+
+流水线行为：
+
+| 工作流 | 触发条件 | 行为 |
+|--------|----------|------|
+| `ci.yml` | 任意分支 push、全部 PR | Python 与扩展的语法检查、单元测试 |
+| `publish-pypi.yml` | `master` 上 `src/**`、`pyproject.toml` 或 `uv.lock` 变化 | 跑测试 → 校验版本号一致 → `uv build` → 上传 PyPI |
+| `release-extension.yml` | `master` 上 `chrome-extension/**` 变化 | 跑扩展测试 → 打包 zip → 创建 `chrome-extension-v<version>` tag 与 Release |
+
+发版约定：
+
+- 改 `src/` 时必须同时提升 `pyproject.toml` 与 `src/m3u8_cli/__init__.py` 的版本号，两者不一致或版本已存在于 PyPI 时流水线会失败。
+- 改 `chrome-extension/` 时必须提升 `chrome-extension/manifest.json` 的 `version`，否则对应 tag 已存在、Release 会失败。
+
+需要一次性配置仓库 Secret `PYPI_API_TOKEN`（PyPI 上限定 `m3u8-cli` 项目的 API token）。
+
+代码结构：
+
+```
+src/m3u8_cli/
+├── cli.py           # 命令行入口与流程编排
+├── convert.py       # 视频格式转换（FFmpeg）
+├── playlist.py      # m3u8 解析
+├── download.py      # 可复用下载核心（mp4/hls、进度、取消）
+├── hls_export.py    # 本地 HLS 导出
+├── serve.py         # REST API 与任务管理
+├── downloader.py    # 单分片下载、重试与 AES-128 解密
+├── merge.py         # 分片合并与 FFmpeg 封装
+├── paths.py         # 任务目录派生
+├── errors.py        # 共享异常
+└── __main__.py      # python -m m3u8_cli
+```
+
+`chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、加载时无需构建），细节见其 README；`scripts/build_extension.py` 负责生成可分发的扩展 zip。
+
+`reference/hls_downloader.py` 是早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护。
+
+## 许可证
+
+本项目采用 [MIT](https://opensource.org/licenses/MIT) 许可证，详见仓库根目录的 `LICENSE` 文件。
+
+## 免责声明
+
+请仅下载你有权访问和保存的内容，并遵守相关网站的服务条款与版权要求。

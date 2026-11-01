@@ -1,0 +1,71 @@
+name: Release Chrome Extension
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "chrome-extension/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extension-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and release extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Run extension tests
+        run: node --test chrome-extension/lib.test.js
+
+      - name: Package extension
+        run: python3 scripts/build_extension.py
+
+      - name: Read extension version
+        id: version
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import pathlib
+
+          manifest = json.loads(
+              pathlib.Path("chrome-extension/manifest.json").read_text(encoding="utf-8")
+          )
+          print(f"version={manifest['version']}")
+          PY
+
+      - name: Check whether tag already exists
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="chrome-extension-v${VERSION}"
+          existing=$(git ls-remote --tags origin "refs/tags/${tag}") || {
+            echo "::error::Failed to query remote tags; check repository access"
+            exit 1
+          }
+          if [ -n "$existing" ]; then
+            echo "::error::Tag ${tag} already exists; bump version in chrome-extension/manifest.json first"
+            exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="chrome-extension-v${VERSION}"
+          gh release create "$tag" \
+            "dist/m3u8-cli-chrome-extension-${VERSION}.zip" \
+            --title "Chrome Extension v${VERSION}" \
+            --generate-notes

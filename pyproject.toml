@@ -1,6 +1,6 @@
 [project]
 name = "m3u8-cli"
-version = "0.2.2"
+version = "0.2.3"
 description = "HLS 视频下载与格式转换工具"
 readme = "README.md"
 authors = [

@@ -53,7 +53,15 @@ uv run python scripts/build_extension.py
 uv build && uv run python scripts/build_extension.py
 ```
 
-仓库目前没有 lint 或格式化配置，也没有 CI；单元测试使用标准库 unittest。
+仓库没有 lint 或格式化配置；单元测试使用标准库 unittest。CI 配置在 `.github/workflows/`，只在 GitHub 远程（`github`）上运行，推 Gitea（`origin`）不会触发：
+
+- `ci.yml`：任意分支 push 与 PR，跑 Python 单元测试、扩展语法检查与 `lib.test.js`。
+- `publish-pypi.yml`：`master` 上 `src/**`、`pyproject.toml`、`uv.lock` 变化时触发，测试通过且版本号未在 PyPI 存在才上传。
+- `release-extension.yml`：`master` 上 `chrome-extension/**` 变化时触发，打包 zip 并创建 `chrome-extension-v<version>` tag 与 Release。
+
+**版本约定**：修改 `src/` 后必须同时提升 `pyproject.toml` 与 `src/m3u8_cli/__init__.py` 的版本号（CI 会校验两者一致），并执行 `uv lock` 同步 `uv.lock`（CI 使用 `uv sync --locked`，锁文件过期会直接失败）；修改 `chrome-extension/` 后必须提升 `manifest.json` 的 `version`，否则对应 tag 已存在会导致发布失败。
+
+**提交与命名约定**：Git 提交信息用英文，结尾不要加 `Co-Authored-By` 等署名；新增文件名保持 ASCII（不要用中文）；工作流的 `name`、job 的 `name`、step 的 `name` 用英文，CI 日志与错误信息也用英文。文档正文可用中文，但根 README 以英文为默认版本：`README.md` 为英文（PyPI 展示的是它），`README.zh-CN.md` 为中文，两者顶部互相链接，修改时同步更新。
 
 ## 架构
 
@@ -96,7 +104,7 @@ uv build && uv run python scripts/build_extension.py
 - `content.js`：扫描 `video/audio/source`、m3u8 链接与内联脚本文本，MutationObserver 去抖后只上报新增 URL；同时按 `og:title` → `twitter:title` → 视频 JSON-LD → `document.title` 采集标题并随消息上报。
 - `popup.*`：候选列表、复制/复制 CLI/下载、任务进度与设置。popup 不直接调用 serve API。
 
-存储与消息协议（改动时同步更新 `chrome-extension/README.md` 与根 README）：
+存储与消息协议（改动时同步更新 `chrome-extension/README.md` 与根 `README.md`/`README.zh-CN.md`）：
 
 - `storage.session["tab:<tabId>"]`：`{pageUrl, pageTitle, items:[{..., pageTitle}]}` 候选列表（每 tab 最多 30 条），输出名优先用标题、缺失时回退 URL 派生名；`storage.session["hdr:<candidateId>"]`：敏感请求头，仅 background 读取。
 - `storage.local["settings"]`：服务地址、token（本机 serve 可留空）、格式、`naming`（`title` 页面标题 / `hash` URL 短 hash）、overwrite、sendCookie、copyCookie。

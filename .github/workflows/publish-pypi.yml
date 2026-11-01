@@ -1,0 +1,79 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run unit tests
+        run: uv run python -m unittest discover -s tests -v
+
+      - name: Check version consistency
+        id: version
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib
+          import re
+          import sys
+          import tomllib
+
+          version = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          )["project"]["version"]
+          source = pathlib.Path("src/m3u8_cli/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', source)
+          if match is None:
+              raise SystemExit("__version__ not found in src/m3u8_cli/__init__.py")
+          if match.group(1) != version:
+              raise SystemExit(
+                  f"Version mismatch: pyproject.toml={version}, "
+                  f"__init__.py={match.group(1)}; both must be updated together"
+              )
+          print(f"version={version}")
+          print(f"Versions match: {version}", file=sys.stderr)
+          PY
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Check whether version already exists on PyPI
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://pypi.org/pypi/m3u8-cli/${VERSION}/json")
+          if [ "$status" = "200" ]; then
+            echo "::error::m3u8-cli ${VERSION} already exists on PyPI; bump the version in pyproject.toml and src/m3u8_cli/__init__.py first"
+            exit 1
+          fi
+          echo "Version ${VERSION} not found on PyPI, proceeding"
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish
