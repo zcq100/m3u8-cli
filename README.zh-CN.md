@@ -245,12 +245,11 @@ m3u8-cli serve --host 127.0.0.1 --port 8787 --token mytoken --output-dir ./downl
 
 权限、Cookie 处理与排障说明见源码仓库中的 `chrome-extension/README.md`。
 
-发布或分发时，可生成只包含运行时文件的 CRX3 签名包：
+发布或分发时，可生成只包含运行时文件的扩展 zip：
 
 ```bash
-# 私钥来自 --key-file、CRX_PRIVATE_KEY_FILE 或 CRX_PRIVATE_KEY
-uv run python scripts/build_extension.py --key-file /path/to/signing-key.pem
-# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.crx
+uv run python scripts/build_extension.py
+# 输出 dist/m3u8-cli-chrome-extension-<manifest 版本>.zip
 ```
 
 ## 下载输出结构
@@ -342,8 +341,8 @@ node --test chrome-extension/lib.test.js
 # 构建 Python 包（sdist 同时包含 chrome-extension/ 源码与打包脚本）
 uv build
 
-# 打包并签名 Chrome 扩展 CRX（输出到 dist/，需要签名私钥）
-uv run python scripts/build_extension.py --key-file /path/to/signing-key.pem
+# 打包 Chrome 扩展 zip（输出到 dist/）
+uv run python scripts/build_extension.py
 
 # 或一次构建全部产物
 uv build && uv run python scripts/build_extension.py
@@ -391,7 +390,7 @@ src/m3u8_cli/
 └── __main__.py      # python -m m3u8_cli
 ```
 
-`chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、加载时无需构建），细节见其 README；`scripts/build_extension.py` 使用 `openssl` 把可分发的扩展打包并签名为 CRX3。
+`chrome-extension/` 是配套的 Chrome 扩展（MV3、原生 JS、加载时无需构建），细节见其 README；`scripts/build_extension.py` 负责生成可分发的扩展 zip。
 
 `reference/hls_downloader.py` 是早期把 m3u8 直接交给 FFmpeg 的轻量实现，仅作参考保留，不再维护。
 
