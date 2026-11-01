@@ -45,8 +45,10 @@ jobs:
           print(f"version={manifest['version']}")
           PY
 
-      - name: Check whether tag already exists
+      - name: Check tag and release state
+        id: state
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           tag="chrome-extension-v${VERSION}"
@@ -55,11 +57,21 @@ jobs:
             exit 1
           }
           if [ -n "$existing" ]; then
-            echo "::error::Tag ${tag} already exists; bump version in chrome-extension/manifest.json first"
-            exit 1
+            remote_sha=${existing%%[[:space:]]*}
+            if [ "$remote_sha" != "${GITHUB_SHA}" ]; then
+              echo "::error::Tag ${tag} already exists at ${remote_sha}; bump version in chrome-extension/manifest.json first"
+              exit 1
+            fi
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release ${tag} already exists for this commit, nothing to do"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Create release
+        if: steps.state.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
